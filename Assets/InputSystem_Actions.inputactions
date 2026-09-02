@@ -38,7 +38,16 @@
                     "id": "852140f2-7766-474d-8707-702459ba45f3",
                     "expectedControlType": "Button",
                     "processors": "",
-                    "interactions": "Hold",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "Throw",
+                    "type": "Button",
+                    "id": "a1b2c3d4-0000-4000-8000-0000000f0001",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
                     "initialStateCheck": false
                 },
                 {
@@ -448,6 +457,17 @@
                     "processors": "",
                     "groups": "Gamepad",
                     "action": "Interact",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "a1b2c3d4-0000-4000-8000-0000000f0002",
+                    "path": "<Keyboard>/f",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard&Mouse",
+                    "action": "Throw",
                     "isComposite": false,
                     "isPartOfComposite": false
                 },
