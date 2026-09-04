@@ -13,9 +13,11 @@ namespace CreatureExperiment.Creature
     /// so it does not stutter at the boundary.
     ///
     /// Approach (0.1): when not retreating and still farther than <see cref="approachStopDistance"/>,
-    /// walk toward <see cref="approachTarget"/> - one explicitly assigned interactable, never
-    /// auto-selected, never read from the gaze target. Pure per-frame pursuit of its current
-    /// position: no prediction, no path.
+    /// walk toward <see cref="_activeTarget"/> - the interactable <see cref="CreaturePerception"/> is
+    /// attending to right now (nearest one; null when it is looking at the player or nothing). Pure
+    /// per-frame pursuit of its current position: no prediction, no path. Attention and this "walk
+    /// to / inspect" target stay separate concepts - this just borrows the attention seam to pick
+    /// what to investigate, and follows it if attention later moves to a different object.
     ///
     /// Inspect (0.1): once inside <see cref="approachStopDistance"/>, hold still and watch for a
     /// random <see cref="inspectDwellMin"/>..<see cref="inspectDwellMax"/> seconds, then slide
@@ -43,8 +45,6 @@ namespace CreatureExperiment.Creature
         [SerializeField] private float retreatSpeed = 1.2f;
 
         [Header("Approach")]
-        [Tooltip("The one interactable the creature walks toward. None -> no approach. Independent of what it looks at.")]
-        [SerializeField] private Interactable approachTarget;
         [Tooltip("Stop moving once flat XZ distance (root to root) is within this.")]
         [SerializeField] private float approachStopDistance = 1.5f;
         [Tooltip("Constant approach speed. Deliberately separate from retreatSpeed.")]
@@ -64,10 +64,20 @@ namespace CreatureExperiment.Creature
 
         private CreaturePerception _perception;
         private bool _retreating;
-        private bool _inspecting;        // currently in an inspect session at approachTarget
+        private bool _inspecting;        // currently in an inspect session at _activeTarget
         private bool _inspectDwelling;   // true = holding still watching, false = sliding to next spot
         private float _inspectTimer;     // seconds left in the current dwell
         private float _inspectTargetAngle; // bearing around the target we hold / move toward, degrees
+        private Interactable _activeTarget; // what we walk to / inspect this frame; mirrored from CreaturePerception.AttendedInteractable
+
+        /// <summary>True while an inspect session is active at <see cref="_activeTarget"/> (dwelling or sliding).</summary>
+        public bool IsInspecting => _inspecting;
+
+        /// <summary>True only on the "holding still and watching" beats of an inspect session, not while sliding to a new spot.</summary>
+        public bool IsInspectDwelling => _inspecting && _inspectDwelling;
+
+        /// <summary>The interactable this component walks toward and inspects this frame, or null. Read-only seam for sibling components (e.g. the physical probe).</summary>
+        public Interactable InspectTarget => _activeTarget;
 
         private void Awake()
         {
@@ -78,6 +88,15 @@ namespace CreatureExperiment.Creature
         {
             UpdateRetreatState();
 
+            // Borrow whatever CreaturePerception is attending to as the thing to investigate. When
+            // that is the player or nothing, _activeTarget is null and Approach / Inspect idle.
+            // A change here mid-session just means the next frames Approach the new object instead.
+            // A held object (by the player, or already carried by this creature) is not something to
+            // walk up to and orbit, so it is excluded here too - this also stops the feedback loop
+            // where the creature would try to ring-orbit an object attached to its own hold anchor.
+            Interactable attended = _perception.AttendedInteractable;
+            _activeTarget = (attended != null && attended.IsHeld) ? null : attended;
+
             // Retreat always wins and ends any inspect session.
             if (_retreating)
             {
@@ -86,13 +105,13 @@ namespace CreatureExperiment.Creature
                 return;
             }
 
-            if (approachTarget == null)
+            if (_activeTarget == null)
             {
                 _inspecting = false;
                 return;
             }
 
-            Vector3 flat = approachTarget.transform.position - transform.position;
+            Vector3 flat = _activeTarget.transform.position - transform.position;
             flat.y = 0f;
             float distance = flat.magnitude;
 
@@ -145,14 +164,14 @@ namespace CreatureExperiment.Creature
             transform.position += away * (retreatSpeed * Time.deltaTime);
         }
 
-        // Straight toward approachTarget's current position, flat XZ, constant speed, stop inside
+        // Straight toward _activeTarget's current position, flat XZ, constant speed, stop inside
         // approachStopDistance. Pure pursuit - the target's live transform, no prediction.
         private void ApproachStep()
         {
-            if (approachTarget == null)
+            if (_activeTarget == null)
                 return;
 
-            Vector3 toward = approachTarget.transform.position - transform.position;
+            Vector3 toward = _activeTarget.transform.position - transform.position;
             toward.y = 0f;
             float distance = toward.magnitude;
 
@@ -163,13 +182,13 @@ namespace CreatureExperiment.Creature
             transform.position += toward * (approachSpeed * Time.deltaTime);
         }
 
-        // Watch / move / watch around approachTarget. Dwell still for a random time, then slide along
+        // Watch / move / watch around _activeTarget. Dwell still for a random time, then slide along
         // the ring (radius approachStopDistance) by a random angular hop to a new spot, then dwell
         // again. Position is always pinned to the ring, flat XZ; Y is never touched. The target's
         // live position is re-read each frame, so a moving object is followed at the same bearing.
         private void InspectStep()
         {
-            Vector3 targetPos = approachTarget.transform.position;
+            Vector3 targetPos = _activeTarget.transform.position;
             Vector3 flat = transform.position - targetPos;
             flat.y = 0f;
             if (flat.sqrMagnitude < 1e-6f)
@@ -241,8 +260,8 @@ namespace CreatureExperiment.Creature
 
             Gizmos.color = new Color(0.4f, 1f, 0.4f); // approach stop distance
             DrawFlatCircle(approachStopDistance);
-            if (approachTarget != null)
-                Gizmos.DrawLine(transform.position, approachTarget.transform.position);
+            if (_activeTarget != null)
+                Gizmos.DrawLine(transform.position, _activeTarget.transform.position);
         }
 
         private void DrawFlatCircle(float radius)

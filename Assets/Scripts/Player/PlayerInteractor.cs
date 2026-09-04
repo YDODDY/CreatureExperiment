@@ -112,7 +112,11 @@ namespace CreatureExperiment.Player
         {
             var ray = new Ray(aimSource.position, aimSource.forward);
             if (Physics.Raycast(ray, out RaycastHit hit, pickupRange, pickupMask, QueryTriggerInteraction.Ignore))
-                return hit.collider.GetComponentInParent<Interactable>();
+            {
+                var it = hit.collider.GetComponentInParent<Interactable>();
+                // An object the creature is already holding is not a focus / pickup candidate.
+                return (it != null && it.IsHeld) ? null : it;
+            }
             return null;
         }
 
@@ -139,6 +143,10 @@ namespace CreatureExperiment.Player
 
         private void Pickup(Interactable interactable)
         {
+            // Claim it. Fails if the creature already holds it - a plain pickup never takes.
+            if (!interactable.TryGrab(this))
+                return;
+
             SetFocus(null);
 
             _held = interactable;
@@ -184,6 +192,7 @@ namespace CreatureExperiment.Player
         {
             Interactable obj = _held;
             _held = null;
+            obj.Release(this);
 
             obj.transform.SetParent(null, worldPositionStays: true);
             obj.transform.SetPositionAndRotation(_placePosition, _placeRotation);
@@ -200,6 +209,7 @@ namespace CreatureExperiment.Player
         {
             Interactable obj = _held;
             _held = null;
+            obj.Release(this);
 
             obj.transform.SetParent(null, worldPositionStays: true);
             EnableHeldColliders();

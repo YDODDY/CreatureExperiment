@@ -75,6 +75,14 @@ namespace CreatureExperiment.Creature
         /// <summary>The transform the creature is gazing at this frame, or null when the range is empty. Read-only, for inspection.</summary>
         public Transform CurrentGazeTarget { get; private set; }
 
+        /// <summary>
+        /// The <see cref="Interactable"/> the creature is currently attending to (the nearest one that won
+        /// <see cref="SelectGazeTarget"/> this frame), or null when the winner is the player or nothing is
+        /// in range. This is only a read-only seam - attention and any "action target" stay separate ideas;
+        /// <c>CreatureMovement</c> merely borrows this to seed what it walks to and inspects this prototype.
+        /// </summary>
+        public Interactable AttendedInteractable { get; private set; }
+
         private void Awake()
         {
             if (lookPivot == null)
@@ -129,6 +137,7 @@ namespace CreatureExperiment.Creature
             float rangeSqr = perceptionRange * perceptionRange;
             float bestSqr = float.MaxValue;
             Transform best = null;
+            Interactable bestInteractable = null;
 
             if (player != null)
             {
@@ -152,10 +161,15 @@ namespace CreatureExperiment.Creature
                     {
                         bestSqr = sqr;
                         best = it.transform;
+                        bestInteractable = it;
                     }
                 }
             }
 
+            // bestInteractable is always the one whose transform is 'best', or null when the player
+            // (checked first, above) or nothing won. Recorded as a read-only seam; selection itself
+            // is unchanged - still pure nearest-by-flat-distance.
+            AttendedInteractable = bestInteractable;
             return best;
         }
 

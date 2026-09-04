@@ -3052,6 +3052,10 @@ GameObject:
   - component: {fileID: 6000035}
   - component: {fileID: 6000036}
   - component: {fileID: 6000037}
+  - component: {fileID: 6000038}
+  - component: {fileID: 6000039}
+  - component: {fileID: 6000300}
+  - component: {fileID: 6000301}
   m_Layer: 0
   m_Name: Creature_Placeholder
   m_TagString: Untagged
@@ -3076,75 +3080,6 @@ Transform:
   - {fileID: 6000041}
   - {fileID: 6000081}
   m_Father: {fileID: 6000001}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &6000096
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 6000097}
-  m_Layer: 0
-  m_Name: BodyVisual
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &6000097
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6000096}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 6000095}
-  - {fileID: 6000101}
-  - {fileID: 6000111}
-  - {fileID: 6000121}
-  - {fileID: 6000131}
-  m_Father: {fileID: 6000031}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &6000094
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 6000095}
-  - component: {fileID: 6000032}
-  - component: {fileID: 6000033}
-  m_Layer: 0
-  m_Name: BodyMesh
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &6000095
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6000094}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.6, y: 1, z: 0.6}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 6000097}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &6000032
 MeshFilter:
@@ -3266,7 +3201,6 @@ MonoBehaviour:
   personalSpace: 3
   comfortDistance: 4.25
   retreatSpeed: 1.2
-  approachTarget: {fileID: 6000016}
   approachStopDistance: 1.5
   approachSpeed: 1.2
   inspectDwellMin: 4
@@ -3274,6 +3208,97 @@ MonoBehaviour:
   inspectMoveSpeed: 0.9
   inspectStepMin: 40
   inspectStepMax: 180
+--- !u!114 &6000037
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  leftArm: {fileID: 6000101}
+  rightArm: {fileID: 6000111}
+  leftLeg: {fileID: 6000121}
+  rightLeg: {fileID: 6000131}
+  swingAmplitude: 32
+  swingSpeed: 8
+  moveSpeedThreshold: 0.05
+  blendSharpness: 8
+  bodyVisual: {fileID: 6000097}
+  bodyTurnSpeed: 270
+--- !u!114 &6000038
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  probeArm: {fileID: 6000111}
+  movement: {fileID: 6000036}
+  pokeForce: 2
+  pokeUpFraction: 0.12
+  reachDuration: 0.16
+  holdDuration: 0.06
+  returnDuration: 0.28
+  reachAmount: 0.85
+  pokeIntervalMin: 3
+  pokeIntervalMax: 7
+  maxPokeDistance: 1.9
+--- !u!114 &6000039
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  grabArm: {fileID: 6000101}
+  holdAnchor: {fileID: 6000201}
+  movement: {fileID: 6000036}
+  releaseMode: 0
+  pickupDelayMin: 5
+  pickupDelayMax: 9
+  grabRange: 1.9
+  reachDuration: 0.22
+  holdDuration: 0.08
+  returnDuration: 0.3
+  reachAmount: 0.9
+  carryDurationMin: 4
+  carryDurationMax: 8
+  releaseReachDuration: 0.3
+  releaseReturnDuration: 0.3
+  placeForwardDistance: 0.9
+  placeRayStartHeight: 1.5
+  placeRayDistance: 3
+  placeMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  throwForce: 6
+  throwUpwardFraction: 0.35
+  debugPhase: 0
+  debugAttentionInteractable: {fileID: 0}
+  debugDwellTarget: {fileID: 0}
+  debugDwellAccum: 0
+  debugThreshold: 0
+  debugIsInspecting: 0
+  debugIsInspectDwelling: 0
+  debugDistanceToTarget: 0
+  debugGrabRange: 0
+  debugTargetIsHeld: 0
+  debugReadyToPickup: 0
 --- !u!1 &6000040
 GameObject:
   m_ObjectHideFlags: 0
@@ -3641,28 +3666,76 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!114 &6000037
-MonoBehaviour:
+--- !u!1 &6000094
+GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6000030}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
-  leftArm: {fileID: 6000101}
-  rightArm: {fileID: 6000111}
-  leftLeg: {fileID: 6000121}
-  rightLeg: {fileID: 6000131}
-  swingAmplitude: 32
-  swingSpeed: 8
-  moveSpeedThreshold: 0.05
-  blendSharpness: 8
-  bodyVisual: {fileID: 6000097}
-  bodyTurnSpeed: 270
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6000095}
+  - component: {fileID: 6000032}
+  - component: {fileID: 6000033}
+  m_Layer: 0
+  m_Name: BodyMesh
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6000095
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000094}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 0.6, y: 1, z: 0.6}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6000097}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &6000096
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6000097}
+  m_Layer: 0
+  m_Name: BodyVisual
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6000097
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000096}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 6000095}
+  - {fileID: 6000101}
+  - {fileID: 6000111}
+  - {fileID: 6000121}
+  - {fileID: 6000131}
+  - {fileID: 6000201}
+  m_Father: {fileID: 6000031}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &6000100
 GameObject:
   m_ObjectHideFlags: 0
@@ -4151,6 +4224,78 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!1 &6000200
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6000201}
+  m_Layer: 0
+  m_Name: CreatureHoldAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6000201
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000200}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.5, y: -0.15, z: 0.3}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6000097}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6000300
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  testKey: 24
+  jumpHeight: 1
+  gravity: 19.62
+--- !u!114 &6000301
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1f6231eaea3c88643808ca7155700cd8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  bodyMesh: {fileID: 6000095}
+  leftLeg: {fileID: 6000121}
+  rightLeg: {fileID: 6000131}
+  headPivot: {fileID: 6000081}
+  leftArm: {fileID: 6000101}
+  rightArm: {fileID: 6000111}
+  holdAnchor: {fileID: 6000201}
+  testKey: 17
+  crouchBodyHeightScale: 0.6
+  crouchBodyWidthMultiplier: 1.15
+  legSpreadDelta: 0.1
+  headLowerDelta: 0.32
+  armLowerDelta: 0.32
+  transitionDuration: 0.35
 --- !u!1 &6100010
 GameObject:
   m_ObjectHideFlags: 0

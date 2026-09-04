@@ -3,8 +3,9 @@ using UnityEngine;
 namespace CreatureExperiment.Interaction
 {
     /// <summary>
-    /// Marker for objects the player can pick up, carry, place and throw.
-    /// It only carries the data the interaction system needs right now.
+    /// Marker for objects that can be picked up and carried (by the player, or by a creature) and
+    /// placed or thrown. It only carries the data the interaction system needs right now, plus a
+    /// single-slot <see cref="Holder"/> so two carriers cannot hold the same object at once.
     /// Per-object "use" behaviour is intentionally left out until it is needed.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
@@ -34,6 +35,37 @@ namespace CreatureExperiment.Interaction
 
         public Vector3 HoldPositionOffset => holdPositionOffset;
         public Quaternion HoldRotationOffset => Quaternion.Euler(holdRotationOffset);
+
+        /// <summary>
+        /// Whoever is currently carrying this object (a <c>PlayerInteractor</c> or a creature's pickup
+        /// component), or null while it sits free in the world. Just enough state for one holder at a
+        /// time - not an ownership system. Set only through <see cref="TryGrab"/> / <see cref="Release"/>.
+        /// </summary>
+        public Object Holder { get; private set; }
+
+        /// <summary>True while someone holds this object. A plain pickup must ignore objects for which this is true.</summary>
+        public bool IsHeld => Holder != null;
+
+        /// <summary>
+        /// Claim this object for <paramref name="holder"/>. Returns false (and changes nothing) if a
+        /// different holder already has it - this is what stops the player and the creature grabbing
+        /// the same object, and what a future Take / Snatch action would deliberately bypass.
+        /// Re-claiming with the same holder is a no-op that returns true.
+        /// </summary>
+        public bool TryGrab(Object holder)
+        {
+            if (holder == null || (Holder != null && Holder != holder))
+                return false;
+            Holder = holder;
+            return true;
+        }
+
+        /// <summary>Drop the claim, but only if <paramref name="holder"/> is the one that holds it right now.</summary>
+        public void Release(Object holder)
+        {
+            if (Holder == holder)
+                Holder = null;
+        }
 
         private void Awake()
         {
