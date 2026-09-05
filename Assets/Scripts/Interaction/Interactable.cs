@@ -47,6 +47,16 @@ namespace CreatureExperiment.Interaction
         public bool IsHeld => Holder != null;
 
         /// <summary>
+        /// True while this object is physically in flight from a Player throw (set by
+        /// <c>PlayerInteractor.Throw</c>, cleared on HIT or on being picked up again mid-flight -
+        /// see <see cref="SetInFlight"/>). Distinct from <see cref="IsHeld"/>: nobody is carrying it,
+        /// it is just not a normal resting world object yet. A creature's own throw does not set this
+        /// (out of scope for now). Not a claim/ownership - just a physical state flag, same shape as
+        /// <see cref="SetFocused"/> below - so it stays free for a future Catch action to also read.
+        /// </summary>
+        public bool IsInFlight { get; private set; }
+
+        /// <summary>
         /// Claim this object for <paramref name="holder"/>. Returns false (and changes nothing) if a
         /// different holder already has it - this is what stops the player and the creature grabbing
         /// the same object, and what a future Take / Snatch action would deliberately bypass.
@@ -79,6 +89,12 @@ namespace CreatureExperiment.Interaction
         {
             if (outlineRenderer != null)
                 outlineRenderer.enabled = focused;
+        }
+
+        /// <summary>Set <see cref="IsInFlight"/>. Called by <c>PlayerInteractor.Throw</c> (true), and by whatever resolves the flight - a mid-flight <c>PlayerInteractor.Pickup</c> or a confirmed HIT (false) right now; a future "came to rest" check is not built yet.</summary>
+        public void SetInFlight(bool inFlight)
+        {
+            IsInFlight = inFlight;
         }
     }
 }

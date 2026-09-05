@@ -147,6 +147,9 @@ namespace CreatureExperiment.Player
             if (!interactable.TryGrab(this))
                 return;
 
+            // A mid-flight catch ends the flight immediately - it is held now, not flying.
+            interactable.SetInFlight(false);
+
             SetFocus(null);
 
             _held = interactable;
@@ -203,6 +206,8 @@ namespace CreatureExperiment.Player
             body.linearVelocity = Vector3.zero;
             body.angularVelocity = Vector3.zero;
             body.Sleep();
+
+            PhysicalEvents.Raise(PhysicalEventKind.Place, obj, this);
         }
 
         private void Throw()
@@ -210,6 +215,7 @@ namespace CreatureExperiment.Player
             Interactable obj = _held;
             _held = null;
             obj.Release(this);
+            obj.SetInFlight(true);
 
             obj.transform.SetParent(null, worldPositionStays: true);
             EnableHeldColliders();
@@ -219,6 +225,8 @@ namespace CreatureExperiment.Player
             body.linearVelocity = aimSource.forward * throwSpeed;
             if (throwSpin > 0f)
                 body.angularVelocity = Random.insideUnitSphere * throwSpin;
+
+            PhysicalEvents.Raise(PhysicalEventKind.Throw, obj, this);
         }
 
         private void EnableHeldColliders()

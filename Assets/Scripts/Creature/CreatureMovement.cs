@@ -63,6 +63,7 @@ namespace CreatureExperiment.Creature
         [SerializeField] private float inspectStepMax = 120f;
 
         private CreaturePerception _perception;
+        private CreatureDash _dash; // optional sibling; null just means "never dashing"
         private bool _retreating;
         private bool _inspecting;        // currently in an inspect session at _activeTarget
         private bool _inspectDwelling;   // true = holding still watching, false = sliding to next spot
@@ -82,6 +83,15 @@ namespace CreatureExperiment.Creature
         private void Awake()
         {
             _perception = GetComponent<CreaturePerception>();
+            _dash = GetComponent<CreatureDash>();
+        }
+
+        // Retreat/Approach/Inspect each own their own base speed; Dash (0.1, dev-test only) just
+        // substitutes its flat speed for whichever one is currently in play, for its duration. Direction
+        // is computed entirely by the caller, untouched here - Dash never decides where to move.
+        private float EffectiveSpeed(float baseSpeed)
+        {
+            return (_dash != null && _dash.IsDashing) ? _dash.DashSpeed : baseSpeed;
         }
 
         private void Update()
@@ -94,8 +104,12 @@ namespace CreatureExperiment.Creature
             // A held object (by the player, or already carried by this creature) is not something to
             // walk up to and orbit, so it is excluded here too - this also stops the feedback loop
             // where the creature would try to ring-orbit an object attached to its own hold anchor.
+            // Likewise a Player-thrown object still in flight (IsInFlight) is excluded from this normal
+            // Approach/Inspect/Pickup target - chasing a flying object here is what was making HIT
+            // detection unreliable. Perception/attention itself (above this component) is untouched, so
+            // the creature can still look at it; a future Catch action would read IsInFlight directly.
             Interactable attended = _perception.AttendedInteractable;
-            _activeTarget = (attended != null && attended.IsHeld) ? null : attended;
+            _activeTarget = (attended != null && (attended.IsHeld || attended.IsInFlight)) ? null : attended;
 
             // Retreat always wins and ends any inspect session.
             if (_retreating)
@@ -161,7 +175,7 @@ namespace CreatureExperiment.Creature
             // Player essentially on top of the creature: pick any flat direction so it still moves off.
             away = distance > 0.0001f ? away / distance : -transform.right;
 
-            transform.position += away * (retreatSpeed * Time.deltaTime);
+            transform.position += away * (EffectiveSpeed(retreatSpeed) * Time.deltaTime);
         }
 
         // Straight toward _activeTarget's current position, flat XZ, constant speed, stop inside
@@ -179,7 +193,7 @@ namespace CreatureExperiment.Creature
                 return;
 
             toward /= distance;
-            transform.position += toward * (approachSpeed * Time.deltaTime);
+            transform.position += toward * (EffectiveSpeed(approachSpeed) * Time.deltaTime);
         }
 
         // Watch / move / watch around _activeTarget. Dwell still for a random time, then slide along
@@ -221,7 +235,7 @@ namespace CreatureExperiment.Creature
             else
             {
                 // Slide along the ring toward the chosen bearing.
-                float degPerSec = (inspectMoveSpeed / Mathf.Max(approachStopDistance, 0.01f)) * Mathf.Rad2Deg;
+                float degPerSec = (EffectiveSpeed(inspectMoveSpeed) / Mathf.Max(approachStopDistance, 0.01f)) * Mathf.Rad2Deg;
                 currentAngle = Mathf.MoveTowardsAngle(currentAngle, _inspectTargetAngle, degPerSec * Time.deltaTime);
 
                 if (Mathf.Abs(Mathf.DeltaAngle(currentAngle, _inspectTargetAngle)) < 0.5f)
