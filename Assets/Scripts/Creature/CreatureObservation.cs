@@ -14,14 +14,22 @@ namespace CreatureExperiment.Creature
     /// <see cref="nearMax"/>, tunable in the Inspector).
     ///
     /// THROW (step 3): does NOT log anything at throw time. Instead the thrown object is added to
-    /// <see cref="_watchedThrows"/> and watched via <see cref="OnCollisionEnter"/> - this GameObject
-    /// already carries the creature's own <c>CapsuleCollider</c> (see the scene), so no extra collider or
-    /// component is needed. A HIT is logged the first time a watched object's collider actually touches
-    /// the creature, and it is removed from the set at that same moment - both what makes repeated
-    /// contact from one throw log only once, and (for now) the entire lifetime of the watch: a throw
-    /// that misses just stays watched with no timeout, since deciding when a miss should stop being
-    /// watched is the future "final rest position" work this step deliberately does not build. Distance,
-    /// trajectory, velocity and closest-approach for a miss are not computed here at all.
+    /// <see cref="_watchedThrows"/> (with a per-object "how long it has been still" timer) and watched
+    /// two ways:
+    ///   - HIT: <see cref="OnCollisionEnter"/> - this GameObject already carries the creature's own
+    ///     <c>CapsuleCollider</c> (see the scene), so no extra collider or component is needed. A HIT is
+    ///     logged the first time a watched object's collider actually touches the creature, and it is
+    ///     removed from the set at that same moment (so repeated contact from one throw logs only once).
+    ///   - MISS: <see cref="FixedUpdate"/> polls each watched object's <see cref="Rigidbody"/>. Once its
+    ///     linear AND angular speed have both stayed below <see cref="settleLinearSpeed"/> /
+    ///     <see cref="settleAngularSpeed"/> continuously for <see cref="settleTime"/>, the throw is
+    ///     considered come-to-rest: it is removed from the set and its final flat XZ distance to the
+    ///     creature is logged and classified with the same bands as PLACE.
+    /// A watched object that stops being <see cref="Interactable.IsInFlight"/> for any other reason
+    /// (the player catches it mid-air, or a HIT already resolved it) is dropped from the set silently -
+    /// that is not a miss. There is deliberately no max-watch timeout yet: if throws are seen to never
+    /// settle in practice, one gets added then. Closest-approach, trajectory, peak speed, FOV/witness
+    /// checks and any semantic reading of the throw are still not computed here at all.
     ///
     /// Only <c>PlayerInteractor</c> raises <see cref="PhysicalEvents"/> right now (see its own class
     /// comment - the creature's own Place/Throw in <see cref="CreaturePickup"/> deliberately does not),
@@ -37,11 +45,25 @@ namespace CreatureExperiment.Creature
         [Tooltip("Raw distance at/above veryCloseMax and below this is NEAR. At/above this is FAR.")]
         [SerializeField] private float nearMax = 2.5f;
 
+        [Header("Throw settle (MISS detection)")]
+        [Tooltip("A thrown object counts as 'moving' while its linear speed (m/s) is at/above this.")]
+        [SerializeField] private float settleLinearSpeed = 0.05f;
+        [Tooltip("...or while its angular speed (rad/s) is at/above this.")]
+        [SerializeField] private float settleAngularSpeed = 0.5f;
+        [Tooltip("Both speeds must stay below their thresholds continuously for this long (seconds) before the throw is logged as a MISS.")]
+        [SerializeField] private float settleTime = 0.3f;
+
         private enum DistanceCategory { VeryClose, Near, Far }
 
-        // Player-thrown objects currently being watched for a HIT. Added on THROW, removed (and logged)
-        // on the first actual collision with the creature.
-        private readonly HashSet<Interactable> _watchedThrows = new HashSet<Interactable>();
+        // Player-thrown objects currently being watched, mapped to how long (seconds) each has been
+        // continuously below the settle speed thresholds. Added on THROW; removed on the first actual
+        // collision with the creature (HIT), on coming to rest (MISS), or when it stops being in flight
+        // for any other reason (mid-air re-pickup).
+        private readonly Dictionary<Interactable, float> _watchedThrows = new Dictionary<Interactable, float>();
+
+        // Reused each FixedUpdate so the watched set can be mutated while iterating it. Never holds
+        // state between frames.
+        private readonly List<Interactable> _settleWorkList = new List<Interactable>();
 
         private void OnEnable()
         {
@@ -67,7 +89,58 @@ namespace CreatureExperiment.Creature
             }
             else if (evt.Kind == PhysicalEventKind.Throw)
             {
-                _watchedThrows.Add(evt.Interactable);
+                _watchedThrows[evt.Interactable] = 0f;
+            }
+        }
+
+        // MISS detection. Walk every watched throw; a throw resolves here only by coming to rest.
+        private void FixedUpdate()
+        {
+            if (_watchedThrows.Count == 0)
+                return;
+
+            float linearSqrThreshold = settleLinearSpeed * settleLinearSpeed;
+            float angularSqrThreshold = settleAngularSpeed * settleAngularSpeed;
+
+            _settleWorkList.Clear();
+            _settleWorkList.AddRange(_watchedThrows.Keys);
+
+            foreach (Interactable thrown in _settleWorkList)
+            {
+                // Destroyed, or flight already resolved another way (player caught it mid-air, or a HIT
+                // handled it in OnCollisionEnter): stop watching, and do NOT log a miss.
+                if (thrown == null || !thrown.IsInFlight)
+                {
+                    _watchedThrows.Remove(thrown);
+                    continue;
+                }
+
+                Rigidbody body = thrown.Body;
+                bool nearlyStopped =
+                    body.linearVelocity.sqrMagnitude < linearSqrThreshold &&
+                    body.angularVelocity.sqrMagnitude < angularSqrThreshold;
+
+                if (!nearlyStopped)
+                {
+                    // Any single frame back above threshold restarts the settle timer.
+                    _watchedThrows[thrown] = 0f;
+                    continue;
+                }
+
+                float stillTime = _watchedThrows[thrown] + Time.fixedDeltaTime;
+                if (stillTime < settleTime)
+                {
+                    _watchedThrows[thrown] = stillTime;
+                    continue;
+                }
+
+                // Settled: this throw missed the creature and has come to rest.
+                _watchedThrows.Remove(thrown);
+                thrown.SetInFlight(false);
+
+                float distance = FlatDistance(thrown.transform.position);
+                DistanceCategory category = Classify(distance);
+                Debug.Log($"[CreatureObservation] THROW {thrown.DisplayName} / MISS / Distance: {distance:F2}m / {CategoryLabel(category)}");
             }
         }
 
@@ -80,8 +153,8 @@ namespace CreatureExperiment.Creature
             if (interactable == null || !_watchedThrows.Remove(interactable))
                 return;
 
-            // Flight resolved by a hit - it's a normal world object again. A miss ending in a settled
-            // rest position is future work and does not clear this yet.
+            // Flight resolved by a hit - it's a normal world object again. (A miss instead resolves in
+            // FixedUpdate once the object comes to rest.)
             interactable.SetInFlight(false);
 
             Debug.Log($"[CreatureObservation] THROW {interactable.DisplayName} / HIT");
@@ -116,6 +189,9 @@ namespace CreatureExperiment.Creature
         {
             veryCloseMax = Mathf.Max(0f, veryCloseMax);
             nearMax = Mathf.Max(veryCloseMax, nearMax);
+            settleLinearSpeed = Mathf.Max(0f, settleLinearSpeed);
+            settleAngularSpeed = Mathf.Max(0f, settleAngularSpeed);
+            settleTime = Mathf.Max(0f, settleTime);
         }
     }
 }
