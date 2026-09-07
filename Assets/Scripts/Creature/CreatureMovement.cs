@@ -64,6 +64,12 @@ namespace CreatureExperiment.Creature
 
         private CreaturePerception _perception;
         private CreatureDash _dash; // optional sibling; null just means "never dashing"
+
+        // Probe seam: while non-null, Approach walks toward THIS transform instead of the attention
+        // target, and on arrival the creature just holds (no inspect ring-orbit). Set/cleared by
+        // CreatureProbe only. Retreat still preempts it - that is deliberate, it keeps the probe wary.
+        private Transform _probeApproach;
+
         private bool _retreating;
         private bool _inspecting;        // currently in an inspect session at _activeTarget
         private bool _inspectDwelling;   // true = holding still watching, false = sliding to next spot
@@ -79,6 +85,17 @@ namespace CreatureExperiment.Creature
 
         /// <summary>The interactable this component walks toward and inspects this frame, or null. Read-only seam for sibling components (e.g. the physical probe).</summary>
         public Interactable InspectTarget => _activeTarget;
+
+        /// <summary>
+        /// CreatureProbe only: while set, the creature walks toward <paramref name="target"/> (using the
+        /// Approach verb) and then holds on arrival - no attention target, no inspect orbit. Retreat
+        /// still wins over this. Pass null via <see cref="ClearProbeApproachTarget"/> to restore normal
+        /// attention-driven movement.
+        /// </summary>
+        public void SetProbeApproachTarget(Transform target) => _probeApproach = target;
+
+        /// <summary>Clears the probe approach override set by <see cref="SetProbeApproachTarget"/>.</summary>
+        public void ClearProbeApproachTarget() => _probeApproach = null;
 
         private void Awake()
         {
@@ -116,6 +133,16 @@ namespace CreatureExperiment.Creature
             {
                 _inspecting = false;
                 RetreatStep();
+                return;
+            }
+
+            // Probe override: walk to the probe target and hold there. No inspect orbit, no attention
+            // target this frame. Sits below Retreat on purpose.
+            if (_probeApproach != null)
+            {
+                _inspecting = false;
+                _activeTarget = null;
+                ProbeApproachStep();
                 return;
             }
 
@@ -176,6 +203,25 @@ namespace CreatureExperiment.Creature
             away = distance > 0.0001f ? away / distance : -transform.right;
 
             transform.position += away * (EffectiveSpeed(retreatSpeed) * Time.deltaTime);
+        }
+
+        // Straight toward the probe target's current position, flat XZ, constant speed, stop inside
+        // approachStopDistance. Same math as ApproachStep but aimed at a plain Transform (the player)
+        // rather than an Interactable. On arrival it does nothing - the creature just holds.
+        private void ProbeApproachStep()
+        {
+            if (_probeApproach == null)
+                return;
+
+            Vector3 toward = _probeApproach.position - transform.position;
+            toward.y = 0f;
+            float distance = toward.magnitude;
+
+            if (distance <= approachStopDistance)
+                return;
+
+            toward /= distance;
+            transform.position += toward * (EffectiveSpeed(approachSpeed) * Time.deltaTime);
         }
 
         // Straight toward _activeTarget's current position, flat XZ, constant speed, stop inside

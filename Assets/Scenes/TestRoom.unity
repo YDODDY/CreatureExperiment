@@ -3059,6 +3059,10 @@ GameObject:
   - component: {fileID: 6000302}
   - component: {fileID: 6000303}
   - component: {fileID: 6000304}
+  - component: {fileID: 6000305}
+  - component: {fileID: 6000306}
+  - component: {fileID: 6000307}
+  - component: {fileID: 6000308}
   m_Layer: 0
   m_Name: Creature_Placeholder
   m_TagString: Untagged
@@ -4326,8 +4330,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1ecefe9a79f4572b06c558b329434c7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  veryCloseMax: 1
   nearMax: 2.5
+  settleLinearSpeed: 0.05
+  settleAngularSpeed: 0.5
+  settleTime: 0.3
 --- !u!54 &6000304
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -4355,6 +4361,82 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
+--- !u!114 &6000305
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dbfeb48fca8b7c145bf2ec6be37cdde5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.CreatureMemory
+  logOnRecord: 1
+--- !u!114 &6000306
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 78b1cbe3135802b4f9fe168a98e1bad8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.CreaturePattern
+  repeatedPlaceNearThreshold: 3
+  repeatedThrowMissNearThreshold: 3
+  placeNearCount: 0
+  repeatedPlaceNearDetected: 0
+  lastPlaceNearObject: {fileID: 0}
+  throwMissNearCount: 0
+  repeatedThrowMissNearDetected: 0
+  lastThrowMissNearObject: {fileID: 0}
+--- !u!114 &6000307
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7bcadf169dab5404d9b6de6a23344a3c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.CreatureProbe
+  probeDelayMin: 2
+  probeDelayMax: 5
+  probeDeliverRange: 4.5
+  deliverRangeHysteresis: 0.75
+  probeReleaseDistance: 3.5
+  probeDeliverTimeout: 15
+  fetchTimeout: 6
+  state: 0
+  outcome: 0
+  probeObject: {fileID: 0}
+  stateTimer: 0
+--- !u!114 &6000308
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6e5f81744c745274894239200c31e8c2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.CreatureThrowProbe
+  probeDelayMin: 2
+  probeDelayMax: 5
+  throwProbeRange: 4
+  fetchTimeout: 6
+  state: 0
+  outcome: 0
+  probeObject: {fileID: 0}
+  stateTimer: 0
 --- !u!1 &6100010
 GameObject:
   m_ObjectHideFlags: 0

@@ -126,6 +126,83 @@ namespace CreatureExperiment.Creature
 
         private enum Phase { Idle, Reaching, Holding, Returning, Carrying, Releasing, ReleaseReturning }
 
+        // --- CreatureProbe seams --------------------------------------------------------------------
+        // Read-only phase probes and two commands. Everything a probe needs to reuse the existing
+        // grab -> carry -> Place pipeline without any of the grab/carry/release logic changing.
+
+        /// <summary>True when nothing is being grabbed, carried or released - safe for a probe to start.</summary>
+        public bool IsIdle => _phase == Phase.Idle;
+
+        /// <summary>True while an object is being carried (post-grab, pre-release).</summary>
+        public bool IsCarrying => _phase == Phase.Carrying;
+
+        /// <summary>True when a release right now would Place (set down), not Throw. CreatureProbe refuses to run otherwise.</summary>
+        public bool ReleaseModeIsPlace => releaseMode == ReleaseMode.Place;
+
+        /// <summary>
+        /// CreatureProbe only: if Idle and <paramref name="target"/> is a free, in-range object, claim it
+        /// and start the normal grab (Reaching -> ... -> Carrying). Returns whether the grab started. The
+        /// carry that follows is flagged so its automatic time-out release is suppressed - the probe
+        /// ends it with <see cref="RequestProbeRelease"/>.
+        /// </summary>
+        public bool RequestProbeGrab(Interactable target)
+        {
+            if (_phase != Phase.Idle)
+                return false;
+            if (target == null || target.Body == null || target.IsHeld)
+                return false;
+            if (FlatDistance(target.transform.position) > grabRange)
+                return false;
+            if (!target.TryGrab(this))
+                return false;
+
+            _target = target;
+            _dwellTarget = null;
+            _dwellAccum = 0f;
+            _aborted = false;
+            _probeCarry = true;
+            _phase = Phase.Reaching;
+            _phaseTimer = 0f;
+            return true;
+        }
+
+        /// <summary>
+        /// Probe only: end the current probe carry now - the object is set down via the exact same
+        /// Releasing -> PlaceTarget -> ReleaseReturning path a normal carry uses. No-op unless a probe
+        /// carry is in progress.
+        /// </summary>
+        public void RequestProbeRelease()
+        {
+            if (_phase != Phase.Carrying || !_probeCarry)
+                return;
+
+            _probeCarry = false;          // re-enable the normal "carry time up" check...
+            _carryTimer = _carryThreshold; // ...and make it fire on the next Update tick
+        }
+
+        /// <summary>
+        /// CreatureThrowProbe only: end the current probe carry now as an AIMED Throw along
+        /// <paramref name="flatAimDir"/> (typically the flat vector to the player), regardless of the
+        /// dev <c>releaseMode</c> toggle. Goes through the same Releasing -> ThrowTarget -> ReleaseReturning
+        /// path a dev-toggle Throw uses; only the direction source changes. No-op unless a probe carry
+        /// is in progress.
+        /// </summary>
+        public void RequestProbeReleaseAsThrow(Vector3 flatAimDir)
+        {
+            if (_phase != Phase.Carrying || !_probeCarry)
+                return;
+
+            _probeThrowPending = true;
+            _probeThrowAimDir = flatAimDir; // BeginReleasing flattens + guards + normalizes, same as facing.forward
+            _probeCarry = false;
+            _carryTimer = _carryThreshold;
+        }
+
+        // True when the release now in progress should Throw (aimed) rather than Place: either the dev
+        // toggle is Throw, or CreatureThrowProbe forced an aimed throw for this probe carry.
+        private bool ReleasingAsThrow => _probeThrowPending || releaseMode == ReleaseMode.Throw;
+        // ------------------------------------------------------------------------------------------
+
         private Quaternion _restLocalRotation;
         private Phase _phase = Phase.Idle;
         private float _phaseTimer;
@@ -138,6 +215,9 @@ namespace CreatureExperiment.Creature
         private float _targetPivotToBottom;  // how far _target's pivot sits above its own lowest point (for flush placement)
         private float _carryTimer;           // seconds spent in Carrying so far
         private float _carryThreshold;       // this carry's random carryDurationMin..Max
+        private bool _probeCarry;            // true while THIS carry was started by a probe - suppresses the automatic carry-time release so the probe alone decides when to set down
+        private bool _probeThrowPending;     // probe carry that must release as an aimed Throw regardless of releaseMode (set by CreatureThrowProbe)
+        private Vector3 _probeThrowAimDir;   // flat world direction for that throw - toward the player
         private Vector3 _armAimPoint;        // world point the arm reaches toward during Releasing (Place's ground spot, or a point out along the throw direction)
         private Vector3 _placePosition;      // Place only: world-space spot the object is actually set down at
         private Quaternion _placeRotation;   // Place only: upright, yawed with the creature's own facing
@@ -167,7 +247,9 @@ namespace CreatureExperiment.Creature
                     // Just hold it (parenting does the work) until the random carry time is up, then
                     // hand off to whichever release capability releaseMode currently selects.
                     _carryTimer += Time.deltaTime;
-                    if (_carryTimer >= _carryThreshold)
+                    // _probeCarry suppresses this automatic release: during a probe carry only
+                    // RequestProbeRelease() (which clears the flag and forces the timer) ends it.
+                    if (!_probeCarry && _carryTimer >= _carryThreshold)
                         BeginReleasing();
                     break;
 
@@ -214,6 +296,8 @@ namespace CreatureExperiment.Creature
                         if (_aborted)
                         {
                             _aborted = false;
+                            _probeCarry = false;
+                            _probeThrowPending = false;
                             _target = null;
                             _dwellAccum = 0f;
                             _dwellTarget = null;
@@ -238,7 +322,7 @@ namespace CreatureExperiment.Creature
                     _phaseTimer += Time.deltaTime;
                     if (_phaseTimer >= releaseReachDuration)
                     {
-                        if (releaseMode == ReleaseMode.Throw)
+                        if (ReleasingAsThrow)
                             ThrowTarget();
                         else
                             PlaceTarget();
@@ -252,6 +336,8 @@ namespace CreatureExperiment.Creature
                     if (_phaseTimer >= releaseReturnDuration)
                     {
                         // Full reset - ready to bank dwell time toward a fresh pickup again.
+                        _probeCarry = false;
+                        _probeThrowPending = false;
                         _target = null;
                         _dwellTarget = null;
                         _dwellAccum = 0f;
@@ -389,16 +475,18 @@ namespace CreatureExperiment.Creature
             // the LookPivot/head the gaze system drives.
             Transform facing = grabArm != null && grabArm.parent != null ? grabArm.parent : transform;
 
-            if (releaseMode == ReleaseMode.Throw)
+            if (ReleasingAsThrow)
             {
-                Vector3 forward = facing.forward;
+                // Dev-toggle Throw uses BodyVisual forward; a probe-forced throw uses the aim direction
+                // CreatureThrowProbe supplied (toward the player). Flatten + guard + normalize the same way.
+                Vector3 forward = _probeThrowPending ? _probeThrowAimDir : facing.forward;
                 forward.y = 0f;
                 if (forward.sqrMagnitude < 1e-6f)
                     forward = Vector3.forward;
                 forward.Normalize();
 
-                // BodyVisual forward blended with a slice of straight up, then normalized and scaled -
-                // the same "blend then normalize" idiom CreaturePhysicalProbe already uses for its poke
+                // Forward blended with a slice of straight up, then normalized and scaled - the same
+                // "blend then normalize" idiom CreaturePhysicalProbe already uses for its poke
                 // direction, reused here for a natural arc instead of a flat throw.
                 Vector3 throwDir = (forward + Vector3.up * throwUpwardFraction).normalized;
                 _throwVelocity = throwDir * throwForce;
@@ -533,7 +621,7 @@ namespace CreatureExperiment.Creature
             Vector3? aimPoint;
             if (_phase == Phase.Releasing)
                 aimPoint = _armAimPoint;
-            else if (_phase == Phase.ReleaseReturning && releaseMode == ReleaseMode.Throw)
+            else if (_phase == Phase.ReleaseReturning && ReleasingAsThrow)
                 aimPoint = null;
             else
                 aimPoint = _target != null ? _target.transform.position : (Vector3?)null;
@@ -581,6 +669,8 @@ namespace CreatureExperiment.Creature
             _dwellAccum = 0f;
             _carryTimer = 0f;
             _aborted = false;
+            _probeCarry = false;
+            _probeThrowPending = false;
         }
 
         private float FlatDistance(Vector3 worldPos)
@@ -635,7 +725,7 @@ namespace CreatureExperiment.Creature
 
             if (Application.isPlaying && (_phase == Phase.Releasing || _phase == Phase.ReleaseReturning))
             {
-                if (releaseMode == ReleaseMode.Place)
+                if (!ReleasingAsThrow)
                 {
                     Gizmos.color = Color.cyan;
                     Gizmos.DrawWireCube(_placePosition, Vector3.one * 0.15f);

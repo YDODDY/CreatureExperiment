@@ -66,6 +66,12 @@ namespace CreatureExperiment.Creature
         private Vector3 _pupilRestLocalPos;
         private Interactable[] _interactables;
 
+        // CreatureProbe seam: while true AND the player is actually perceived, the creature LOOKS at the
+        // player regardless of what SelectGazeTarget picked. It does not change attention selection
+        // itself (AttendedInteractable is still computed every frame), only the gaze/head/pupil aim.
+        // When the player is not perceived this falls back to the normal gaze - there is no search gaze.
+        private bool _forcePlayerGaze;
+
         /// <summary>Whether the player is currently within perception range. The seam <c>CreatureMovement</c> reads.</summary>
         public bool IsPlayerPerceived { get; private set; }
 
@@ -110,10 +116,26 @@ namespace CreatureExperiment.Creature
             _interactables = FindObjectsByType<Interactable>(FindObjectsSortMode.None);
         }
 
+        /// <summary>
+        /// CreatureProbe only: force the creature's gaze onto the player for the duration of a probe.
+        /// Honoured only while <see cref="IsPlayerPerceived"/>; otherwise the normal nearest-target gaze
+        /// is used (no search gaze). Attention selection is unaffected either way.
+        /// </summary>
+        public void SetForcePlayerGaze(bool on) => _forcePlayerGaze = on;
+
         private void Update()
         {
             IsPlayerPerceived = PerceivePlayer();
-            CurrentGazeTarget = SelectGazeTarget();
+
+            // Selection still runs every frame so AttendedInteractable stays correct for
+            // CreatureMovement / CreaturePickup. The override below only changes what the creature
+            // looks at, not what it treats as its attention target.
+            Transform selected = SelectGazeTarget();
+
+            CurrentGazeTarget = (_forcePlayerGaze && IsPlayerPerceived && player != null)
+                ? (playerGazeTarget != null ? playerGazeTarget : player)
+                : selected;
+
             UpdateGazeDirection(CurrentGazeTarget);
             UpdateHead();
             UpdatePupil();

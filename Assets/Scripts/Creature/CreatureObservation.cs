@@ -5,13 +5,66 @@ using CreatureExperiment.Interaction;
 namespace CreatureExperiment.Creature
 {
     /// <summary>
+    /// Two-band spatial relevance of a thing to the creature. Not visibility - FAR is not "unseen",
+    /// only "currently of low relevance to the creature".
+    /// </summary>
+    public enum Proximity
+    {
+        /// <summary>Close enough that a relationship to the creature could arise.</summary>
+        Near,
+        /// <summary>Currently of low relevance to the creature (not necessarily out of sight).</summary>
+        Far
+    }
+
+    /// <summary>
+    /// One observation, as data. Purely the physical facts of a single Player release action as the
+    /// creature could register it - no interpretation (Gift/Attack/Friend), no witness/FOV, no memory.
+    /// Nothing here is stored, accumulated, or fed into patterns/hypotheses yet; it exists only so the
+    /// three log paths below build the same value before printing it.
+    /// </summary>
+    public readonly struct Observation
+    {
+        /// <summary>The object that was placed or thrown.</summary>
+        public readonly Interactable Object;
+
+        /// <summary>Which physical release action this was (Place / Throw). Not a semantic label.</summary>
+        public readonly PhysicalEventKind Action;
+
+        /// <summary>True only when a thrown object actually touched the creature (Throw HIT).</summary>
+        public readonly bool ContactedCreature;
+
+        /// <summary>Near / Far band of <see cref="DistanceFromCreature"/>.</summary>
+        public readonly Proximity Proximity;
+
+        /// <summary>Flat XZ distance (metres) from the creature root at the moment of observation.</summary>
+        public readonly float DistanceFromCreature;
+
+        /// <summary>
+        /// When the observation happened (<see cref="UnityEngine.Time.time"/>). Recorded as origin
+        /// information only - not stored or analysed anywhere yet.
+        /// </summary>
+        public readonly float Time;
+
+        public Observation(Interactable obj, PhysicalEventKind action, bool contactedCreature,
+            Proximity proximity, float distanceFromCreature, float time)
+        {
+            Object = obj;
+            Action = action;
+            ContactedCreature = contactedCreature;
+            Proximity = proximity;
+            DistanceFromCreature = distanceFromCreature;
+            Time = time;
+        }
+    }
+
+    /// <summary>
     /// Observation (0.1): listens for <see cref="PhysicalEvents"/> and reports two purely physical facts
     /// about Player release actions - no interpretation (Gift/Threat/Attack), no FOV/witness check, no
     /// Memory, no Decision/Intent.
     ///
     /// PLACE (step 2): logs the flat XZ distance between the placed <see cref="Interactable"/> and this
-    /// creature's root, plus which spatial distance band it falls in (<see cref="veryCloseMax"/> /
-    /// <see cref="nearMax"/>, tunable in the Inspector).
+    /// creature's root, plus which spatial band it falls in (NEAR below <see cref="nearMax"/>, FAR at or
+    /// above it - tunable in the Inspector).
     ///
     /// THROW (step 3): does NOT log anything at throw time. Instead the thrown object is added to
     /// <see cref="_watchedThrows"/> (with a per-object "how long it has been still" timer) and watched
@@ -24,12 +77,15 @@ namespace CreatureExperiment.Creature
     ///     linear AND angular speed have both stayed below <see cref="settleLinearSpeed"/> /
     ///     <see cref="settleAngularSpeed"/> continuously for <see cref="settleTime"/>, the throw is
     ///     considered come-to-rest: it is removed from the set and its final flat XZ distance to the
-    ///     creature is logged and classified with the same bands as PLACE.
+    ///     creature is logged and classified with the same band as PLACE.
     /// A watched object that stops being <see cref="Interactable.IsInFlight"/> for any other reason
     /// (the player catches it mid-air, or a HIT already resolved it) is dropped from the set silently -
     /// that is not a miss. There is deliberately no max-watch timeout yet: if throws are seen to never
     /// settle in practice, one gets added then. Closest-approach, trajectory, peak speed, FOV/witness
     /// checks and any semantic reading of the throw are still not computed here at all.
+    ///
+    /// Each of the three log paths (PLACE, THROW HIT, THROW MISS) first builds one <see cref="Observation"/>
+    /// value and then prints from it. Nothing about that value is kept afterwards.
     ///
     /// Only <c>PlayerInteractor</c> raises <see cref="PhysicalEvents"/> right now (see its own class
     /// comment - the creature's own Place/Throw in <see cref="CreaturePickup"/> deliberately does not),
@@ -37,12 +93,12 @@ namespace CreatureExperiment.Creature
     /// that for now. That is also why the creature's own throws can never register a HIT: they never
     /// enter <see cref="_watchedThrows"/> in the first place.
     /// </summary>
+    [RequireComponent(typeof(CreatureMemory))]
+    [RequireComponent(typeof(CreaturePattern))]
     public class CreatureObservation : MonoBehaviour
     {
-        [Header("Distance bands (metres, flat XZ) - spatial classification only, tune freely")]
-        [Tooltip("Raw distance below this is VERY_CLOSE.")]
-        [SerializeField] private float veryCloseMax = 1.0f;
-        [Tooltip("Raw distance at/above veryCloseMax and below this is NEAR. At/above this is FAR.")]
+        [Header("Distance band (metres, flat XZ) - spatial relevance only, tune freely")]
+        [Tooltip("Flat XZ distance below this is NEAR (a relationship to the creature could arise here). At or above it is FAR - currently low relevance to the creature, not necessarily out of sight.")]
         [SerializeField] private float nearMax = 2.5f;
 
         [Header("Throw settle (MISS detection)")]
@@ -53,8 +109,6 @@ namespace CreatureExperiment.Creature
         [Tooltip("Both speeds must stay below their thresholds continuously for this long (seconds) before the throw is logged as a MISS.")]
         [SerializeField] private float settleTime = 0.3f;
 
-        private enum DistanceCategory { VeryClose, Near, Far }
-
         // Player-thrown objects currently being watched, mapped to how long (seconds) each has been
         // continuously below the settle speed thresholds. Added on THROW; removed on the first actual
         // collision with the creature (HIT), on coming to rest (MISS), or when it stops being in flight
@@ -64,6 +118,17 @@ namespace CreatureExperiment.Creature
         // Reused each FixedUpdate so the watched set can be mutated while iterating it. Never holds
         // state between frames.
         private readonly List<Interactable> _settleWorkList = new List<Interactable>();
+
+        // Sibling consumers every observation below is handed to. Required components, always present.
+        // _memory stores it; _pattern counts the ones that matter to it. They do not know about each other.
+        private CreatureMemory _memory;
+        private CreaturePattern _pattern;
+
+        private void Awake()
+        {
+            _memory = GetComponent<CreatureMemory>();
+            _pattern = GetComponent<CreaturePattern>();
+        }
 
         private void OnEnable()
         {
@@ -84,8 +149,17 @@ namespace CreatureExperiment.Creature
             if (evt.Kind == PhysicalEventKind.Place)
             {
                 float distance = FlatDistance(evt.Interactable.transform.position);
-                DistanceCategory category = Classify(distance);
-                Debug.Log($"[CreatureObservation] PLACE {evt.Interactable.DisplayName} / Distance: {distance:F2}m / {CategoryLabel(category)}");
+                var observation = new Observation(
+                    evt.Interactable,
+                    PhysicalEventKind.Place,
+                    contactedCreature: false,
+                    Classify(distance),
+                    distance,
+                    Time.time);
+
+                Debug.Log($"[CreatureObservation] PLACE {observation.Object.DisplayName} / Distance: {observation.DistanceFromCreature:F2}m / {ProximityLabel(observation.Proximity)}");
+                _memory.Record(observation);
+                _pattern.Observe(observation);
             }
             else if (evt.Kind == PhysicalEventKind.Throw)
             {
@@ -139,8 +213,17 @@ namespace CreatureExperiment.Creature
                 thrown.SetInFlight(false);
 
                 float distance = FlatDistance(thrown.transform.position);
-                DistanceCategory category = Classify(distance);
-                Debug.Log($"[CreatureObservation] THROW {thrown.DisplayName} / MISS / Distance: {distance:F2}m / {CategoryLabel(category)}");
+                var observation = new Observation(
+                    thrown,
+                    PhysicalEventKind.Throw,
+                    contactedCreature: false,
+                    Classify(distance),
+                    distance,
+                    Time.time);
+
+                Debug.Log($"[CreatureObservation] THROW {observation.Object.DisplayName} / MISS / Distance: {observation.DistanceFromCreature:F2}m / {ProximityLabel(observation.Proximity)}");
+                _memory.Record(observation);
+                _pattern.Observe(observation);
             }
         }
 
@@ -157,7 +240,18 @@ namespace CreatureExperiment.Creature
             // FixedUpdate once the object comes to rest.)
             interactable.SetInFlight(false);
 
-            Debug.Log($"[CreatureObservation] THROW {interactable.DisplayName} / HIT");
+            float distance = FlatDistance(interactable.transform.position);
+            var observation = new Observation(
+                interactable,
+                PhysicalEventKind.Throw,
+                contactedCreature: true,
+                Classify(distance),
+                distance,
+                Time.time);
+
+            Debug.Log($"[CreatureObservation] THROW {observation.Object.DisplayName} / HIT");
+            _memory.Record(observation);
+            _pattern.Observe(observation);
         }
 
         // Same flat XZ convention CreatureMovement/CreaturePickup already use for every other distance
@@ -169,26 +263,15 @@ namespace CreatureExperiment.Creature
             return flat.magnitude;
         }
 
-        private DistanceCategory Classify(float distance)
-        {
-            if (distance < veryCloseMax)
-                return DistanceCategory.VeryClose;
-            if (distance < nearMax)
-                return DistanceCategory.Near;
-            return DistanceCategory.Far;
-        }
+        private Proximity Classify(float distance) =>
+            distance < nearMax ? Proximity.Near : Proximity.Far;
 
-        private static string CategoryLabel(DistanceCategory category) => category switch
-        {
-            DistanceCategory.VeryClose => "VERY_CLOSE",
-            DistanceCategory.Near => "NEAR",
-            _ => "FAR",
-        };
+        private static string ProximityLabel(Proximity proximity) =>
+            proximity == Proximity.Near ? "NEAR" : "FAR";
 
         private void OnValidate()
         {
-            veryCloseMax = Mathf.Max(0f, veryCloseMax);
-            nearMax = Mathf.Max(veryCloseMax, nearMax);
+            nearMax = Mathf.Max(0f, nearMax);
             settleLinearSpeed = Mathf.Max(0f, settleLinearSpeed);
             settleAngularSpeed = Mathf.Max(0f, settleAngularSpeed);
             settleTime = Mathf.Max(0f, settleTime);
