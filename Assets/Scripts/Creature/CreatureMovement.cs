@@ -26,6 +26,10 @@ namespace CreatureExperiment.Creature
     /// rhythm. Gaze / head / pupil keep tracking it throughout (CreaturePerception, untouched).
     ///
     /// Priority is just Retreat &gt; (Approach | Inspect); one movement per frame, never blended.
+    /// Strictly lower-priority siblings (<see cref="CreaturePlayerObserve"/>, then
+    /// <see cref="CreatureWander"/>) may translate the root only on frames <see cref="IsDrivingRoot"/>
+    /// is false; they take no part in the arbitration here and this component neither reads nor knows
+    /// about them.
     /// A temporary arbitration for the prototype, not an AI. Deliberately tiny: no NavMesh, no
     /// pathfinding, no obstacle avoidance, no body rotation, no acceleration, no state machine, no
     /// vector blending. Walking through walls and chasing thrown objects are accepted this pass.
@@ -71,6 +75,7 @@ namespace CreatureExperiment.Creature
         private Transform _probeApproach;
 
         private bool _retreating;
+        private bool _approaching;       // ApproachStep() ran this frame (straight-line walk toward _activeTarget, not yet Inspecting)
         private bool _inspecting;        // currently in an inspect session at _activeTarget
         private bool _inspectDwelling;   // true = holding still watching, false = sliding to next spot
         private float _inspectTimer;     // seconds left in the current dwell
@@ -85,6 +90,25 @@ namespace CreatureExperiment.Creature
 
         /// <summary>The interactable this component walks toward and inspects this frame, or null. Read-only seam for sibling components (e.g. the physical probe).</summary>
         public Interactable InspectTarget => _activeTarget;
+
+        /// <summary>
+        /// True only on frames the straight-line Object <see cref="ApproachStep"/> actually ran - i.e.
+        /// the creature is walking toward <see cref="InspectTarget"/> and has not yet arrived to Inspect.
+        /// False during Retreat, a Probe approach, Inspect, or idle. The lower-priority
+        /// <see cref="CreatureApproachDash"/> reads this (plus the target distance) to decide whether a
+        /// long Approach earns one Dash. Valid after this component's <see cref="Update"/> for the frame.
+        /// </summary>
+        public bool IsApproaching => _approaching;
+
+        /// <summary>
+        /// True on any frame this component is driving the creature root - Retreat, a Probe approach,
+        /// or an Approach/Inspect toward an attention target. False only when <see cref="Update"/>
+        /// reached its "nothing to do" fall-through (no attention target, not retreating, no probe).
+        /// The strictly lower-priority <see cref="CreatureWander"/> reads this to know it may move the
+        /// creature, and yields the instant it flips back to true. Valid after this component's
+        /// <see cref="Update"/> has run for the frame (CreatureWander runs after it by execution order).
+        /// </summary>
+        public bool IsDrivingRoot => _retreating || _probeApproach != null || _activeTarget != null;
 
         /// <summary>
         /// CreatureProbe only: while set, the creature walks toward <paramref name="target"/> (using the
@@ -103,9 +127,10 @@ namespace CreatureExperiment.Creature
             _dash = GetComponent<CreatureDash>();
         }
 
-        // Retreat/Approach/Inspect each own their own base speed; Dash (0.1, dev-test only) just
-        // substitutes its flat speed for whichever one is currently in play, for its duration. Direction
-        // is computed entirely by the caller, untouched here - Dash never decides where to move.
+        // Retreat/Approach/Inspect each own their own base speed; Dash just substitutes its flat speed
+        // for whichever one is currently in play, for its duration. A dash is started by the dev key OR
+        // by CreatureApproachDash (only during a long Object Approach - see IsApproaching); either way
+        // this stays a pure HOW-FAST swap, direction is the caller's, Dash never decides where to move.
         private float EffectiveSpeed(float baseSpeed)
         {
             return (_dash != null && _dash.IsDashing) ? _dash.DashSpeed : baseSpeed;
@@ -114,6 +139,7 @@ namespace CreatureExperiment.Creature
         private void Update()
         {
             UpdateRetreatState();
+            _approaching = false; // set true below only if ApproachStep() runs this frame
 
             // Borrow whatever CreaturePerception is attending to as the thing to investigate. When
             // that is the player or nothing, _activeTarget is null and Approach / Inspect idle.
@@ -160,6 +186,7 @@ namespace CreatureExperiment.Creature
             {
                 // Still closing in -> straight-line Approach; no inspect session yet.
                 _inspecting = false;
+                _approaching = true;
                 ApproachStep();
             }
             else

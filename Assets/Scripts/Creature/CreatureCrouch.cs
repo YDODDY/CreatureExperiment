@@ -4,10 +4,31 @@ using UnityEngine.InputSystem;
 namespace CreatureExperiment.Creature
 {
     /// <summary>
-    /// Crouch (0.1): a DEV-TEST-ONLY capability check, not a decision the creature makes or a reaction
-    /// to the player. Press <see cref="testKey"/> in Play Mode to toggle between a Stand and a
-    /// "low and wide" Crouch posture, easing smoothly over <see cref="transitionDuration"/>. Nothing in
-    /// Attention / Movement / Probe / Pickup ever presses this key or reads <see cref="IsCrouching"/>.
+    /// Crouch (0.1): a "low and wide" posture that eases smoothly over <see cref="transitionDuration"/>.
+    /// Three ways in, one implementation and one safety gate:
+    /// <list type="bullet">
+    /// <item>DEV: press <see cref="testKey"/> in Play Mode - a pure capability check.</item>
+    /// <item>Expressive: <see cref="CreaturePlayerObserve"/> calls <see cref="SetCrouching"/> to hunker
+    /// down briefly while it watches the player.</item>
+    /// <item>Environmental (0.1): this component itself, each frame, looks a short distance along the
+    /// creature's ACTUAL current movement (frame-to-frame XZ delta - it never creates a destination,
+    /// only reacts to motion some other behaviour is already producing) for a ceiling low enough that
+    /// the standing capsule would not fit but a crouched one would, and requests Crouch. It also holds
+    /// Crouch whenever a stand right now would have no headroom.</item>
+    /// </list>
+    /// The dev key and <see cref="SetCrouching"/> both set <c>_wantCrouchExternal</c>; the effective
+    /// target is <c>_wantCrouchExternal || environmentRequiresCrouch || !HasStandClearance()</c>. That
+    /// last term is the whole point of Environmental Crouch 0.1: a Stand request (dev key, or Player
+    /// Observe's <see cref="SetCrouching"/>(false)) made under a low ceiling is DEFERRED, not obeyed -
+    /// the creature stays down until it is physically clear to rise. No requester registry, no
+    /// priority stack; just one OR and one clearance test the capability owns.
+    ///
+    /// This is a REAL physical crouch, not just visuals: the same eased <c>_t</c> also lerps the
+    /// creature's <see cref="CapsuleCollider"/> down - <see cref="crouchColliderHeight"/> with the
+    /// centre re-anchored so the feet stay planted and the top comes down - so the crouched creature
+    /// actually fits through the low tunnel. <see cref="CreatureWallCollision"/> re-reads the collider
+    /// live every frame, so it depenetrates whatever size the capsule currently is with no change
+    /// needed there. Nothing in Attention / Movement / Probe / Pickup touches this component.
     ///
     /// The creature is a plain capsule mesh + primitive limb pivots, not a rig with knees, so this is
     /// not a squat animation - it is "fold low and wide": <see cref="bodyMesh"/> (the capsule under
@@ -59,6 +80,8 @@ namespace CreatureExperiment.Creature
     /// re-reads the anchor's position after that, so the object's own transform is never written here
     /// either - it rides along purely through the existing parent-child relationship.
     /// </summary>
+    [RequireComponent(typeof(CapsuleCollider))]
+    [DefaultExecutionOrder(60)] // after the movers (CreatureMovement 0, PlayerObserve 40, Wander 50) so the frame's real movement delta is known; before CreatureWallCollision (200)
     public class CreatureCrouch : MonoBehaviour
     {
         [Header("References (posture-only transforms - see class doc for why these and not others)")]
@@ -95,6 +118,26 @@ namespace CreatureExperiment.Creature
         [Tooltip("Seconds for a full Stand<->Crouch transition. Toggling mid-transition just reverses smoothly from wherever it currently is.")]
         [SerializeField] private float transitionDuration = 0.35f;
 
+        [Header("Environmental crouch (0.1) - real collider + clearance, no navigation")]
+        [Tooltip("The CapsuleCollider's HEIGHT at full crouch (its standing height and centre are read live at Awake). Feet stay planted; the top comes down. Keep this below the lowest ceiling you want the creature to pass under - the sandbox crouch tunnel gives ~1.30 m of clearance.")]
+        [SerializeField] private float crouchColliderHeight = 1.1f;
+        [Tooltip("How far ahead along the creature's actual movement direction to look for a low ceiling, in metres. Big enough that the transition finishes before the creature reaches it.")]
+        [SerializeField] private float lookAheadDistance = 1f;
+        [Tooltip("Probe spheres are shrunk by this much (metres) so they do not catch geometry the creature is merely brushing past.")]
+        [SerializeField] private float clearanceSkin = 0.05f;
+        [Tooltip("Flat speed (m/s) above which the creature counts as 'moving' for the forward low-ceiling probe. Below it, only the overhead safety check runs.")]
+        [SerializeField] private float moveSpeedThreshold = 0.05f;
+        [Tooltip("Layers the clearance probes treat as blocking (ceilings, walls, props). Default Everything; the floor and the creature's own collider are excluded by geometry / a self-filter, so Everything is fine.")]
+        [SerializeField] private LayerMask clearanceMask = ~0;
+
+        [Header("Environmental crouch state (read-only, for debugging)")]
+        [Tooltip("True when a stand right here, right now would have no headroom - Stand requests are refused while this holds.")]
+        [SerializeField] private bool standBlocked;
+        [Tooltip("True when a low ceiling is close ahead along the current movement direction.")]
+        [SerializeField] private bool environmentRequiresCrouch;
+        [Tooltip("The effective crouch target this frame: external request OR environment ahead OR no headroom to rise.")]
+        [SerializeField] private bool effectiveCrouch;
+
         private Vector3 _bodyMeshStandScale;
         private Vector3 _bodyMeshStandLocalPos;
         private Vector3 _leftLegStandLocalPos;
@@ -104,14 +147,42 @@ namespace CreatureExperiment.Creature
         private Vector3 _rightArmStandLocalPos;
         private Vector3 _holdAnchorStandLocalPos;
 
-        private bool _crouching;
+        private CapsuleCollider _capsule;
+        private float _standColliderHeight;
+        private float _standColliderCenterY;
+        private Vector3 _lastPos;
+
+        private bool _wantCrouchExternal; // the dev key / SetCrouching request - NOT the effective state
+        private bool _crouching;          // effective target this frame (external OR environment OR no-headroom)
         private float _t; // 0 = fully Stand, 1 = fully Crouch; eased and applied fresh every frame
 
-        /// <summary>True once the toggle has requested Crouch (regardless of how far the transition has eased). Read-only seam; nothing in this prototype consumes it yet.</summary>
+        private readonly Collider[] _probeHits = new Collider[8];
+
+        /// <summary>True while the effective posture target is Crouch - whether that came from a request, the environment ahead, or being under a ceiling with no room to rise. Reflects the eased posture's destination, not how far it has got.</summary>
         public bool IsCrouching => _crouching;
+
+        /// <summary>True when a stand right now would have no headroom. While this holds, <see cref="SetCrouching"/>(false) and the dev key cannot bring the creature up.</summary>
+        public bool StandBlocked => standBlocked;
+
+        /// <summary>
+        /// Request seam: <paramref name="on"/> true asks for Crouch, false asks for Stand. This only
+        /// sets the EXTERNAL request - the effective posture is still
+        /// <c>request || environmentRequiresCrouch || !HasStandClearance()</c>, so a Stand asked for
+        /// under a low ceiling is deferred until the creature is physically clear. Same field the dev
+        /// <see cref="testKey"/> toggles; used by <see cref="CreaturePlayerObserve"/>. Idempotent.
+        /// </summary>
+        public void SetCrouching(bool on) => _wantCrouchExternal = on;
 
         private void Awake()
         {
+            _capsule = GetComponent<CapsuleCollider>();
+            if (_capsule != null)
+            {
+                _standColliderHeight = _capsule.height;
+                _standColliderCenterY = _capsule.center.y;
+            }
+            _lastPos = transform.position;
+
             if (bodyMesh != null)
             {
                 _bodyMeshStandScale = bodyMesh.localScale;
@@ -127,12 +198,34 @@ namespace CreatureExperiment.Creature
 
         private void Update()
         {
+            float dt = Time.deltaTime;
+
+            // DEV manual test now toggles the EXTERNAL request, exactly like SetCrouching - never the
+            // effective posture directly.
             var keyboard = Keyboard.current;
             if (testKey != Key.None && keyboard != null && keyboard[testKey].wasPressedThisFrame)
-                _crouching = !_crouching;
+                _wantCrouchExternal = !_wantCrouchExternal;
+
+            // The creature's ACTUAL movement this frame (flat). Environmental crouch only ever reacts
+            // to motion another behaviour is already producing - it never sets a destination.
+            Vector3 delta = transform.position - _lastPos;
+            delta.y = 0f;
+            _lastPos = transform.position;
+            float speed = dt > 0f ? delta.magnitude / dt : 0f;
+            Vector3 moveDir = (speed > moveSpeedThreshold && delta.sqrMagnitude > 1e-8f)
+                ? delta.normalized
+                : Vector3.zero;
+
+            environmentRequiresCrouch = moveDir != Vector3.zero && ForwardPathRequiresCrouch(moveDir);
+            standBlocked = !HasStandClearance();
+
+            // Effective target. The !HasStandClearance() term is the safety gate: a Stand request made
+            // under a low ceiling is deferred, not obeyed, until there is room to rise.
+            effectiveCrouch = _wantCrouchExternal || environmentRequiresCrouch || standBlocked;
+            _crouching = effectiveCrouch;
 
             float target = _crouching ? 1f : 0f;
-            _t = Mathf.MoveTowards(_t, target, Time.deltaTime / Mathf.Max(transitionDuration, 0.01f));
+            _t = Mathf.MoveTowards(_t, target, dt / Mathf.Max(transitionDuration, 0.01f));
 
             // Every frame recomputes the full posture as a pure function of _t against the cached
             // stand baselines above - never an incremental nudge - so repeated toggling can never
@@ -184,15 +277,87 @@ namespace CreatureExperiment.Creature
             // CreaturePickup already set up - its own transform is never touched here.
             if (holdAnchor != null)
                 holdAnchor.localPosition = _holdAnchorStandLocalPos - new Vector3(0f, armDrop, 0f);
+
+            // Real physical crouch: lerp the CapsuleCollider down on the SAME eased _t. Height shrinks
+            // toward crouchColliderHeight; centre.y drops by exactly half the height loss so the
+            // capsule's BOTTOM (the feet) stays fixed and only the top comes down - identical idea to
+            // the BodyMesh re-anchor above. Radius and direction are left alone. CreatureWallCollision
+            // reads this live, so it always depenetrates the current size with no change needed there.
+            if (_capsule != null)
+            {
+                float h = Mathf.Lerp(_standColliderHeight, crouchColliderHeight, e);
+                Vector3 c = _capsule.center;
+                c.y = Mathf.Lerp(_standColliderCenterY, _standColliderCenterY - (_standColliderHeight - crouchColliderHeight) * 0.5f, e);
+                _capsule.center = c;
+                _capsule.height = h;
+            }
+        }
+
+        // Is there a low ceiling close ahead along the creature's current movement? True only when the
+        // STANDING capsule's head would be blocked at the look-ahead point but a CROUCHED capsule
+        // would still fit there (otherwise it is a wall, which CreatureWallCollision already handles).
+        private bool ForwardPathRequiresCrouch(Vector3 moveDir)
+        {
+            Vector3 ahead = transform.position + moveDir * lookAheadDistance;
+            float footY = FootWorldY();
+            float r = Mathf.Max(0.01f, _capsule.radius - clearanceSkin);
+
+            bool standHeadBlockedAhead = AnyObstacleAt(ahead, footY + _standColliderHeight - _capsule.radius, r);
+            if (!standHeadBlockedAhead)
+                return false;
+
+            // Would a crouched creature actually pass there? Probe at the crouched capsule's own head
+            // height; if that is clear, it is a passage, not a wall.
+            bool crouchFitsAhead = !AnyObstacleAt(ahead, footY + crouchColliderHeight - _capsule.radius, r);
+            return crouchFitsAhead;
+        }
+
+        // Could the creature stand right here, right now, without its head hitting anything? Mirrors
+        // PlayerMovement.CanStandUp: one sphere where the standing capsule's top sphere-centre would
+        // be. Self-filtered so the creature's own (currently crouched) capsule never counts.
+        private bool HasStandClearance()
+        {
+            if (_capsule == null)
+                return true;
+            float footY = FootWorldY();
+            float r = Mathf.Max(0.01f, _capsule.radius - clearanceSkin);
+            return !AnyObstacleAt(transform.position, footY + _standColliderHeight - _capsule.radius, r);
+        }
+
+        // World Y of the capsule's bottom (the feet). Derived from the STANDING size cached at Awake
+        // and the live root Y, so it tracks the root (e.g. a dev-test Jump) without drifting as the
+        // collider is resized.
+        private float FootWorldY()
+        {
+            return transform.position.y + _standColliderCenterY - _standColliderHeight * 0.5f;
+        }
+
+        // True if anything on clearanceMask (other than the creature itself) overlaps a sphere of
+        // <paramref name="radius"/> centred at (xz of <paramref name="atXZ"/>, <paramref name="worldY"/>).
+        private bool AnyObstacleAt(Vector3 atXZ, float worldY, float radius)
+        {
+            Vector3 centre = new Vector3(atXZ.x, worldY, atXZ.z);
+            int n = Physics.OverlapSphereNonAlloc(centre, radius, _probeHits, clearanceMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < n; i++)
+            {
+                Collider h = _probeHits[i];
+                if (h == null || h == _capsule)
+                    continue;
+                if (h.transform == transform || h.transform.IsChildOf(transform))
+                    continue;
+                return true;
+            }
+            return false;
         }
 
         // Safety net only - not a gameplay path. If this component is disabled mid-transition, don't
-        // leave the creature stuck in a squashed / spread posture.
+        // leave the creature stuck in a squashed / spread posture or a shrunken collider.
         private void OnDisable()
         {
+            _wantCrouchExternal = false;
             _crouching = false;
             _t = 0f;
-            ApplyPosture(0f);
+            ApplyPosture(0f); // also restores the standing collider height / centre
         }
 
         private void OnValidate()
@@ -203,6 +368,39 @@ namespace CreatureExperiment.Creature
             headLowerDelta = Mathf.Max(0f, headLowerDelta);
             armLowerDelta = Mathf.Max(0f, armLowerDelta);
             transitionDuration = Mathf.Max(0.01f, transitionDuration);
+            crouchColliderHeight = Mathf.Max(0.2f, crouchColliderHeight);
+            lookAheadDistance = Mathf.Max(0f, lookAheadDistance);
+            clearanceSkin = Mathf.Max(0f, clearanceSkin);
+            moveSpeedThreshold = Mathf.Max(0f, moveSpeedThreshold);
+        }
+
+        private void OnDrawGizmosSelected()
+        {
+            var capsule = _capsule != null ? _capsule : GetComponent<CapsuleCollider>();
+            if (capsule == null)
+                return;
+
+            float standH = Application.isPlaying ? _standColliderHeight : capsule.height;
+            float standCY = Application.isPlaying ? _standColliderCenterY : capsule.center.y;
+            float footY = transform.position.y + standCY - standH * 0.5f;
+            float r = Mathf.Max(0.01f, capsule.radius - clearanceSkin);
+
+            // overhead stand-clearance sphere (green = clear / red = blocked)
+            Vector3 head = new Vector3(transform.position.x, footY + standH - capsule.radius, transform.position.z);
+            Gizmos.color = (Application.isPlaying && standBlocked) ? new Color(1f, 0.3f, 0.2f) : new Color(0.3f, 1f, 0.4f);
+            Gizmos.DrawWireSphere(head, r);
+
+            // forward look-ahead probe point at standing-head height
+            Vector3 fwd = transform.forward;
+            if (Application.isPlaying)
+            {
+                Vector3 d = transform.position - _lastPos; d.y = 0f;
+                if (d.sqrMagnitude > 1e-8f) fwd = d.normalized;
+            }
+            Vector3 ahead = transform.position + fwd.normalized * lookAheadDistance;
+            Gizmos.color = (Application.isPlaying && environmentRequiresCrouch) ? new Color(1f, 0.6f, 0.1f) : new Color(0.5f, 0.7f, 1f);
+            Gizmos.DrawLine(head, new Vector3(ahead.x, head.y, ahead.z));
+            Gizmos.DrawWireSphere(new Vector3(ahead.x, footY + standH - capsule.radius, ahead.z), r);
         }
     }
 }

@@ -4,11 +4,12 @@ using UnityEngine.InputSystem;
 namespace CreatureExperiment.Creature
 {
     /// <summary>
-    /// Dash (0.1): a DEV-TEST-ONLY capability check, not a decision the creature makes - there is no
-    /// Observation/Memory/Intent/Decision wiring here, on purpose. Press <see cref="testKey"/> once in
-    /// Play Mode and the creature's current movement runs at <see cref="dashSpeed"/> for
-    /// <see cref="dashDuration"/> seconds, then reverts exactly to its normal speed. Pressing again
-    /// mid-dash does nothing - the timer is neither reset nor extended, so dashes never stack or chain.
+    /// Dash (0.1): a flat speed substitution for <see cref="dashDuration"/> seconds. Two ways in, one
+    /// implementation: press <see cref="testKey"/> for a pure DEV-TEST capability check, OR
+    /// <see cref="CreatureApproachDash"/> calls <see cref="RequestDash"/> for one burst partway through
+    /// a long Object Approach (that component owns the WHEN; this still owns only the HOW-FAST). Either
+    /// way, a dash already running is never re-triggered, reset or extended - dashes never stack or
+    /// chain. Still no Observation/Memory/Intent/Decision wiring in here.
     ///
     /// Ownership split (why this never fights CreatureMovement for transform.position): CreatureMovement
     /// decides WHERE to move - Retreat away from the player, Approach <c>_activeTarget</c>, or slide
@@ -43,14 +44,35 @@ namespace CreatureExperiment.Creature
         /// <summary>The flat speed (m/s) to use in place of the current movement verb's own speed while <see cref="IsDashing"/> is true.</summary>
         public float DashSpeed => dashSpeed;
 
+        /// <summary>
+        /// Autonomy seam: start one dash now, exactly as the dev key does - same <see cref="dashDuration"/>
+        /// and <see cref="dashSpeed"/>, no duplicated timer. No-op while a dash is already running, so it
+        /// can never stack or extend. Used by <see cref="CreatureApproachDash"/>.
+        /// </summary>
+        public void RequestDash()
+        {
+            if (IsDashing)
+                return;
+            IsDashing = true;
+            _timer = dashDuration;
+        }
+
+        /// <summary>
+        /// Autonomy seam: end the current dash immediately - for when the behaviour that asked for it
+        /// (a long Object Approach) was cancelled or handed off. Safe any time; a no-op if not dashing.
+        /// Does not affect a future dev-key dash.
+        /// </summary>
+        public void CancelDash()
+        {
+            IsDashing = false;
+            _timer = 0f;
+        }
+
         private void Update()
         {
             var keyboard = Keyboard.current;
             if (!IsDashing && testKey != Key.None && keyboard != null && keyboard[testKey].wasPressedThisFrame)
-            {
-                IsDashing = true;
-                _timer = dashDuration;
-            }
+                RequestDash();
 
             if (!IsDashing)
                 return;
