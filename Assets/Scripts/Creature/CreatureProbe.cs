@@ -208,6 +208,14 @@ namespace CreatureExperiment.Creature
 
         // Walking to the player. Retreat may slow / cap the approach - that is fine. If the player
         // leaves the deliver condition, go back to Holding and keep carrying.
+        //
+        // Navigation 0.1: while CreatureNavLocomotion is actively carrying a valid, still-shortening
+        // NavMesh path (_movement.IsNavProgressing), the creature is legitimately detouring around a
+        // wall - its STRAIGHT-LINE distance to the player may not fall, or may even rise, without that
+        // being failure. So the two give-ups that used straight-line distance / a raw timer are
+        // suppressed while that holds, and "arrived" is judged by the actual route length. When Nav is
+        // unavailable (no bake / no agent) IsNavProgressing is false and NavDistanceToDestination is
+        // the flat straight-line distance, so this behaves exactly as it did before.
         private void TickDelivering()
         {
             stateTimer += Time.deltaTime;
@@ -226,10 +234,12 @@ namespace CreatureExperiment.Creature
                 return;
             }
 
-            // Player broke the deliver condition (out of range + hysteresis, or no longer perceived):
-            // stop approaching, hold, wait for them again.
+            bool navProgressing = _movement.IsNavProgressing;
+
+            // Player broke the deliver condition (no longer perceived, or straight-line far AND not
+            // being reached by a live path): stop approaching, hold, wait for them again.
             if (!_perception.IsPlayerPerceived ||
-                FlatDistance(player.position) > probeDeliverRange + deliverRangeHysteresis)
+                (FlatDistance(player.position) > probeDeliverRange + deliverRangeHysteresis && !navProgressing))
             {
                 _movement.ClearProbeApproachTarget();
                 state = ProbeState.Holding;
@@ -237,13 +247,17 @@ namespace CreatureExperiment.Creature
                 return;
             }
 
-            if (FlatDistance(player.position) <= probeReleaseDistance)
+            // Arrived - by the actual route length when navigating, straight-line in fallback. This is
+            // why a wall between the creature and the player no longer lets "success" fire through it.
+            if (_movement.NavDistanceToDestination(player.position) <= probeReleaseDistance)
             {
                 EnterFinishing(ProbeOutcome.Success);
                 return;
             }
 
-            if (stateTimer >= probeDeliverTimeout)
+            // Too long trying - but only counts as failure once the creature is NOT making path
+            // progress (a genuinely stuck / no-path delivery), not merely because a detour is long.
+            if (stateTimer >= probeDeliverTimeout && !navProgressing)
                 EnterFinishing(ProbeOutcome.Aborted);
         }
 

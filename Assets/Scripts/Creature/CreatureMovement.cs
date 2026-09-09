@@ -30,9 +30,13 @@ namespace CreatureExperiment.Creature
     /// <see cref="CreatureWander"/>) may translate the root only on frames <see cref="IsDrivingRoot"/>
     /// is false; they take no part in the arbitration here and this component neither reads nor knows
     /// about them.
-    /// A temporary arbitration for the prototype, not an AI. Deliberately tiny: no NavMesh, no
-    /// pathfinding, no obstacle avoidance, no body rotation, no acceleration, no state machine, no
-    /// vector blending. Walking through walls and chasing thrown objects are accepted this pass.
+    /// A temporary arbitration for the prototype, not an AI. Deliberately tiny: no body rotation, no
+    /// acceleration, no state machine, no vector blending. Object Approach and Probe approach hand
+    /// their per-frame "step toward the target" to <see cref="CreatureNavLocomotion"/> when it is
+    /// present (Navigation 0.1) so they route around walls via the sandbox doorways instead of
+    /// straight-lining into them; the target point and every decision are still chosen here, Nav only
+    /// changes HOW the step is taken, and with no baked NavMesh it falls back to the old straight
+    /// line. Retreat / Inspect keep their straight-line writes.
     /// <see cref="CreaturePerception"/> drives gaze / head / pupil independently and is not touched.
     /// </summary>
     [RequireComponent(typeof(CreaturePerception))]
@@ -68,6 +72,7 @@ namespace CreatureExperiment.Creature
 
         private CreaturePerception _perception;
         private CreatureDash _dash; // optional sibling; null just means "never dashing"
+        private CreatureNavLocomotion _nav; // optional sibling; null (or no baked NavMesh) => straight-line, exactly as before
 
         // Probe seam: while non-null, Approach walks toward THIS transform instead of the attention
         // target, and on arrival the creature just holds (no inspect ring-orbit). Set/cleared by
@@ -125,6 +130,29 @@ namespace CreatureExperiment.Creature
         {
             _perception = GetComponent<CreaturePerception>();
             _dash = GetComponent<CreatureDash>();
+            _nav = GetComponent<CreatureNavLocomotion>();
+        }
+
+        /// <summary>
+        /// True only while <see cref="CreatureNavLocomotion"/> is actively carrying a valid, still-
+        /// shortening NavMesh path this frame. False in straight-line fallback (no agent / no bake)
+        /// and when a path has stalled. <see cref="CreatureProbe"/>'s delivery give-ups read this so a
+        /// legitimate detour around a wall is not mistaken for a stalled delivery; nothing else uses it.
+        /// </summary>
+        public bool IsNavProgressing => _nav != null && _nav.NavAvailable && _nav.IsProgressing;
+
+        /// <summary>
+        /// Distance to <paramref name="worldDest"/> measured along the NavMesh route when a complete
+        /// path exists, else the flat straight-line distance (the fallback meaning). <see cref="CreatureProbe"/>
+        /// uses this for its delivery release check so "success" cannot fire through a wall.
+        /// </summary>
+        public float NavDistanceToDestination(Vector3 worldDest)
+        {
+            if (_nav != null)
+                return _nav.DistanceToDestination(worldDest);
+            Vector3 flat = worldDest - transform.position;
+            flat.y = 0f;
+            return flat.magnitude;
         }
 
         // Retreat/Approach/Inspect each own their own base speed; Dash just substitutes its flat speed
@@ -232,41 +260,50 @@ namespace CreatureExperiment.Creature
             transform.position += away * (EffectiveSpeed(retreatSpeed) * Time.deltaTime);
         }
 
-        // Straight toward the probe target's current position, flat XZ, constant speed, stop inside
-        // approachStopDistance. Same math as ApproachStep but aimed at a plain Transform (the player)
-        // rather than an Interactable. On arrival it does nothing - the creature just holds.
+        // Toward the probe target's current position, flat XZ, constant speed, stop inside
+        // approachStopDistance. Same as ApproachStep but aimed at a plain Transform (the player). The
+        // step is routed via CreatureNavLocomotion when present, straight otherwise. On arrival it
+        // does nothing - the creature just holds.
         private void ProbeApproachStep()
         {
             if (_probeApproach == null)
                 return;
 
-            Vector3 toward = _probeApproach.position - transform.position;
+            Vector3 targetPos = _probeApproach.position;
+            Vector3 toward = targetPos - transform.position;
             toward.y = 0f;
             float distance = toward.magnitude;
 
             if (distance <= approachStopDistance)
                 return;
 
-            toward /= distance;
-            transform.position += toward * (EffectiveSpeed(approachSpeed) * Time.deltaTime);
+            if (_nav != null)
+                _nav.MoveToward(targetPos, EffectiveSpeed(approachSpeed));
+            else
+                transform.position += (toward / distance) * (EffectiveSpeed(approachSpeed) * Time.deltaTime);
         }
 
-        // Straight toward _activeTarget's current position, flat XZ, constant speed, stop inside
-        // approachStopDistance. Pure pursuit - the target's live transform, no prediction.
+        // Toward _activeTarget's current position, flat XZ, constant speed, stop inside
+        // approachStopDistance. The step is routed via CreatureNavLocomotion when present (so it goes
+        // around walls to a still-visible object across a doorway), straight otherwise. Still pure
+        // pursuit of the target's live position - no prediction, and this never picks the target.
         private void ApproachStep()
         {
             if (_activeTarget == null)
                 return;
 
-            Vector3 toward = _activeTarget.transform.position - transform.position;
+            Vector3 targetPos = _activeTarget.transform.position;
+            Vector3 toward = targetPos - transform.position;
             toward.y = 0f;
             float distance = toward.magnitude;
 
             if (distance <= approachStopDistance)
                 return;
 
-            toward /= distance;
-            transform.position += toward * (EffectiveSpeed(approachSpeed) * Time.deltaTime);
+            if (_nav != null)
+                _nav.MoveToward(targetPos, EffectiveSpeed(approachSpeed));
+            else
+                transform.position += (toward / distance) * (EffectiveSpeed(approachSpeed) * Time.deltaTime);
         }
 
         // Watch / move / watch around _activeTarget. Dwell still for a random time, then slide along

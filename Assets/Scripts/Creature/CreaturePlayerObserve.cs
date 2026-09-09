@@ -103,6 +103,7 @@ namespace CreatureExperiment.Creature
         private CreaturePerception _perception;
         private CreaturePickup _pickup;   // optional
         private CreatureCrouch _crouch;   // optional - autonomous crouch is skipped entirely when absent
+        private CreatureNavLocomotion _nav; // optional - null (or no baked NavMesh) => straight-line hop, as before
 
         private float _observeDuration;   // this Observing beat's rolled length
         private bool _crouchPlanned;      // this Observing beat rolled a crouch that has not finished yet
@@ -115,6 +116,7 @@ namespace CreatureExperiment.Creature
             _perception = GetComponent<CreaturePerception>();
             _pickup = GetComponent<CreaturePickup>();
             _crouch = GetComponent<CreatureCrouch>();
+            _nav = GetComponent<CreatureNavLocomotion>();
             _observeDuration = Random.Range(observeTimeMin, observeTimeMax);
         }
 
@@ -241,7 +243,9 @@ namespace CreatureExperiment.Creature
             float snapDist = toSnap.magnitude;
 
             // End the hop: reached the snapshot, back within observeDistance of the LIVE player, or the
-            // hop's time cap hit. Any of these -> stop and watch again.
+            // hop's time cap hit. Any of these -> stop and watch again. (These stop conditions - the
+            // 2s cap and the straight-line observeDistance - are deliberately unchanged: Navigation
+            // only changes how the hop step is taken, not the anti-follow rhythm.)
             if (snapDist <= approachArriveDistance
                 || FlatDistance(_perception.Player.position) <= observeDistance
                 || secondsInState >= approachMaxTime)
@@ -251,7 +255,11 @@ namespace CreatureExperiment.Creature
                 return;
             }
 
-            transform.position += (toSnap / snapDist) * (approachSpeed * Time.deltaTime);
+            // Route the hop toward the (stale) snapshot via the NavMesh when available, straight otherwise.
+            if (_nav != null)
+                _nav.MoveToward(approachTarget, approachSpeed);
+            else
+                transform.position += (toSnap / snapDist) * (approachSpeed * Time.deltaTime);
         }
 
         private float FlatDistance(Vector3 world)
