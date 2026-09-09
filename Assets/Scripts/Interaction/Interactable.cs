@@ -10,7 +10,7 @@ namespace CreatureExperiment.Interaction
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     [RequireComponent(typeof(Collider))]
-    public class Interactable : MonoBehaviour
+    public class Interactable : MonoBehaviour, IFocusTarget
     {
         [Header("Display")]
         [Tooltip("Name shown to the player when this object is focused. Falls back to the GameObject name.")]
@@ -32,6 +32,11 @@ namespace CreatureExperiment.Interaction
         public Rigidbody Body => _body != null ? _body : (_body = GetComponent<Rigidbody>());
 
         public string DisplayName => string.IsNullOrEmpty(displayName) ? gameObject.name : displayName;
+
+        // --- IFocusTarget: the Focus feedback (outline + name) treats an Interactable and a
+        //     non-pickup FocusableProp the same way. SetFocused(bool) below is the third member.
+        string IFocusTarget.FocusName => DisplayName;
+        Transform IFocusTarget.FocusTransform => transform;
 
         public Vector3 HoldPositionOffset => holdPositionOffset;
         public Quaternion HoldRotationOffset => Quaternion.Euler(holdRotationOffset);

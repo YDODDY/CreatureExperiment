@@ -52,7 +52,7 @@ namespace CreatureExperiment.Player
         private InputAction _interactAction;
         private InputAction _throwAction;
 
-        private Interactable _focus;
+        private IFocusTarget _focus;
         private Interactable _held;
         private Collider[] _heldColliders;
         private float _heldPivotToBottom;
@@ -61,6 +61,9 @@ namespace CreatureExperiment.Player
         private bool _placeValid;
         private Vector3 _placePosition;
         private Quaternion _placeRotation;
+
+        /// <summary>True while the player is carrying an item. A separate <c>PlayerActivator</c> reads this so the Interact key means "place" (here), not "use" (a card terminal / bed).</summary>
+        public bool IsHolding => _held != null;
 
         private void Awake()
         {
@@ -91,8 +94,11 @@ namespace CreatureExperiment.Player
             {
                 SetFocus(FindFocusInView());
 
-                if (_focus != null && _interactAction.WasPressedThisFrame())
-                    Pickup(_focus);
+                // Only pick up when the focus is an actual Interactable. A non-pickup focus target
+                // (a FocusableProp on a card terminal / bed) gets the outline + name but its Interact
+                // is handled by its own path (PlayerActivator -> IUsable).
+                if (_focus is Interactable focusItem && _interactAction.WasPressedThisFrame())
+                    Pickup(focusItem);
                 return;
             }
 
@@ -105,32 +111,37 @@ namespace CreatureExperiment.Player
         }
 
         /// <summary>
-        /// The single source of truth for "what is the player pointing at, in reach".
-        /// Used for both the focus feedback and the pickup itself.
+        /// The single source of truth for "what is the player pointing at, in reach". Feeds the focus
+        /// feedback and (when it is an <see cref="Interactable"/>) the pickup. Now also matches a
+        /// non-pickup <see cref="IFocusTarget"/> (a card terminal / bed via FocusableProp).
         /// </summary>
-        private Interactable FindFocusInView()
+        private IFocusTarget FindFocusInView()
         {
             var ray = new Ray(aimSource.position, aimSource.forward);
             if (Physics.Raycast(ray, out RaycastHit hit, pickupRange, pickupMask, QueryTriggerInteraction.Ignore))
             {
-                var it = hit.collider.GetComponentInParent<Interactable>();
+                var target = hit.collider.GetComponentInParent<IFocusTarget>();
                 // An object the creature is already holding is not a focus / pickup candidate.
-                return (it != null && it.IsHeld) ? null : it;
+                if (target is Interactable it && it.IsHeld)
+                    return null;
+                return target;
             }
             return null;
         }
 
-        private void SetFocus(Interactable next)
+        private void SetFocus(IFocusTarget next)
         {
-            if (next == _focus)
+            if (ReferenceEquals(next, _focus))
                 return;
 
-            if (_focus != null)
+            // `as Object` so the null test is Unity-lifetime-aware (an IFocusTarget is always a
+            // MonoBehaviour); never call SetFocused on a destroyed object.
+            if (_focus as Object != null)
                 _focus.SetFocused(false);
 
             _focus = next;
 
-            if (_focus != null)
+            if (_focus as Object != null)
             {
                 _focus.SetFocused(true);
                 if (focusLabel != null) focusLabel.Show(_focus);
