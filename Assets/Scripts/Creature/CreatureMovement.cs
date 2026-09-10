@@ -25,6 +25,25 @@ namespace CreatureExperiment.Creature
     /// viewing spot, and dwell again. Repeats. Not a continuous orbit - a "watch / move / watch"
     /// rhythm. Gaze / head / pupil keep tracking it throughout (CreaturePerception, untouched).
     ///
+    /// Lost-target persistence (0.1): if an object the creature was actually perceiving drops out of
+    /// perception (range / FOV / LOS) for a moment - e.g. a thrown object rolling quickly across the
+    /// view - the creature does not blank instantly. Every frame it genuinely perceives a free
+    /// object it snapshots that object's position into <see cref="_lastKnownTargetPos"/>; when it
+    /// then loses it, it walks to that snapshot for up to <see cref="lostTargetGrace"/> seconds to
+    /// check. A Player-thrown object still in flight counts as "perceived" here (it keeps the
+    /// snapshot fresh) even though it is never an <see cref="_activeTarget"/> - so watching a fast
+    /// throw / roll and then losing it can start a coast. This is deliberately NOT "still seeing it":
+    /// <see cref="_activeTarget"/> / <see cref="InspectTarget"/> / <see cref="IsInspecting"/> all
+    /// read null/false during the coast, so <see cref="CreaturePickup"/>'s dwell timer and every
+    /// other perception-dependent reader stay paused - they only resume if <see cref="CreaturePerception"/>
+    /// re-attends to the object, which flips this straight back to live Approach/Inspect. Reaching
+    /// the last-known spot, or the grace expiring, ends the coast and the creature falls back to
+    /// idle / Wander. During the coast <see cref="CreaturePerception"/> reads <see cref="LostGazePoint"/>
+    /// and keeps the head/gaze aimed at that spot, so the persistence is actually visible - still
+    /// without treating the object as perceived. Applies to every <see cref="Interactable"/> equally
+    /// - there is no per-object logic, no KnownObject registry, no search state machine, and
+    /// CreatureMemory is not touched.
+    ///
     /// Priority is just Retreat &gt; (Approach | Inspect); one movement per frame, never blended.
     /// Strictly lower-priority siblings (<see cref="CreaturePlayerObserve"/>, then
     /// <see cref="CreatureWander"/>) may translate the root only on frames <see cref="IsDrivingRoot"/>
@@ -70,6 +89,18 @@ namespace CreatureExperiment.Creature
         [Tooltip("Largest angular hop to the next viewing spot, in degrees.")]
         [SerializeField] private float inspectStepMax = 120f;
 
+        [Header("Lost-target persistence (object Approach/Inspect only)")]
+        [Tooltip("When an attended object drops out of perception (range / FOV / LOS), the creature " +
+                 "spends up to this long walking to the LAST position it actually perceived the object " +
+                 "at, then gives up. It is NOT treated as still seeing the object - pickup / inspect " +
+                 "progress only resumes if perception re-acquires it. 0 = off (instant stop, the old behaviour).")]
+        [SerializeField] private float lostTargetGrace = 2f;
+        [Tooltip("Flat XZ distance at which the lost-target coast counts as having REACHED the last-known " +
+                 "position (and gives up). Separate from Approach's approachStopDistance (1.5 m) on purpose - " +
+                 "kept small so the creature actually walks up to the spot to check instead of stopping short. " +
+                 "Only LostCoastStep() uses this.")]
+        [SerializeField] private float lostArrivalDistance = 0.4f;
+
         private CreaturePerception _perception;
         private CreatureDash _dash; // optional sibling; null just means "never dashing"
         private CreatureNavLocomotion _nav; // optional sibling; null (or no baked NavMesh) => straight-line, exactly as before
@@ -87,6 +118,14 @@ namespace CreatureExperiment.Creature
         private float _inspectTargetAngle; // bearing around the target we hold / move toward, degrees
         private Interactable _activeTarget; // what we walk to / inspect this frame; mirrored from CreaturePerception.AttendedInteractable
 
+        // Lost-target persistence. _lost is true only while coasting to a lost object's last-known
+        // position; it is NOT "the creature can see the object". _activeTarget is null throughout.
+        private bool _lost;
+        private float _lostTimer;            // seconds spent in the current lost coast
+        private Vector3 _lastKnownTargetPos; // last position _lostFrom was ACTUALLY perceived at
+        private Interactable _lostFrom;      // the object we lost - kept only to re-check it stays free, and for gizmos
+        private bool _lostFromWasInFlight;   // latched: _lostFrom was seen in flight at least once this episode -> this is a moving-object pursuit, not a static-object LOS blip
+
         /// <summary>True while an inspect session is active at <see cref="_activeTarget"/> (dwelling or sliding).</summary>
         public bool IsInspecting => _inspecting;
 
@@ -95,6 +134,23 @@ namespace CreatureExperiment.Creature
 
         /// <summary>The interactable this component walks toward and inspects this frame, or null. Read-only seam for sibling components (e.g. the physical probe).</summary>
         public Interactable InspectTarget => _activeTarget;
+
+        /// <summary>
+        /// While the creature is coasting to a lost object's last-known position (<see cref="_lost"/>),
+        /// this is that world position; null at every other time. <see cref="CreaturePerception"/>
+        /// reads it to keep the head/gaze pointed there for the duration of the coast - a visible
+        /// "still checking" beat. It is NOT "the object is perceived": attention selection, Approach,
+        /// Inspect, Pickup and the probes all stay off exactly as when perception is simply empty.
+        /// </summary>
+        public Vector3? LostGazePoint => _lost ? _lastKnownTargetPos : (Vector3?)null;
+
+        /// <summary>
+        /// The Interactable this component is currently lost-coasting toward (<see cref="_lost"/>), or
+        /// null. <see cref="CreaturePerception"/>'s Object Attention Budget reads it so a brief lost
+        /// gap does NOT reset the attention episode timer for that object. Not "perceived" - it is the
+        /// object whose last-known position the creature is walking to.
+        /// </summary>
+        public Interactable LostTargetInteractable => _lost ? _lostFrom : null;
 
         /// <summary>
         /// True only on frames the straight-line Object <see cref="ApproachStep"/> actually ran - i.e.
@@ -107,13 +163,13 @@ namespace CreatureExperiment.Creature
 
         /// <summary>
         /// True on any frame this component is driving the creature root - Retreat, a Probe approach,
-        /// or an Approach/Inspect toward an attention target. False only when <see cref="Update"/>
-        /// reached its "nothing to do" fall-through (no attention target, not retreating, no probe).
+        /// an Approach/Inspect toward an attention target, or a lost-target coast to a last-known
+        /// position. False only when <see cref="Update"/> reached its "nothing to do" fall-through.
         /// The strictly lower-priority <see cref="CreatureWander"/> reads this to know it may move the
         /// creature, and yields the instant it flips back to true. Valid after this component's
         /// <see cref="Update"/> has run for the frame (CreatureWander runs after it by execution order).
         /// </summary>
-        public bool IsDrivingRoot => _retreating || _probeApproach != null || _activeTarget != null;
+        public bool IsDrivingRoot => _retreating || _probeApproach != null || _activeTarget != null || _lost;
 
         /// <summary>
         /// CreatureProbe only: while set, the creature walks toward <paramref name="target"/> (using the
@@ -169,18 +225,67 @@ namespace CreatureExperiment.Creature
             UpdateRetreatState();
             _approaching = false; // set true below only if ApproachStep() runs this frame
 
-            // Borrow whatever CreaturePerception is attending to as the thing to investigate. When
-            // that is the player or nothing, _activeTarget is null and Approach / Inspect idle.
-            // A change here mid-session just means the next frames Approach the new object instead.
-            // A held object (by the player, or already carried by this creature) is not something to
-            // walk up to and orbit, so it is excluded here too - this also stops the feedback loop
-            // where the creature would try to ring-orbit an object attached to its own hold anchor.
-            // Likewise a Player-thrown object still in flight (IsInFlight) is excluded from this normal
-            // Approach/Inspect/Pickup target - chasing a flying object here is what was making HIT
-            // detection unreliable. Perception/attention itself (above this component) is untouched, so
-            // the creature can still look at it; a future Catch action would read IsInFlight directly.
+            // CreaturePerception picks the nearest thing it can see; this component turns that into a
+            // walk-to / inspect target, a lost-target snapshot, or nothing.
             Interactable attended = _perception.AttendedInteractable;
-            _activeTarget = (attended != null && (attended.IsHeld || attended.IsInFlight)) ? null : attended;
+
+            // What CreaturePerception is actually looking at right now, as long as nobody is carrying
+            // it. This DELIBERATELY still includes a Player-thrown object that is in flight - the
+            // creature can watch it and remember where it is, so losing sight of it later can begin a
+            // lost coast. A held object (player's, or this creature's own carry) feeds nothing, same
+            // as before - that also stops the ring-orbit feedback loop on a self-held object.
+            Interactable perceivedFree = (attended != null && !attended.IsHeld) ? attended : null;
+
+            // What the creature may actually walk up to / orbit / grab this frame. In-flight objects
+            // stay excluded here exactly as before (pursuing a flying object broke HIT detection), so
+            // Approach / Inspect / Pickup / CreatureApproachDash are unchanged. When this is null
+            // every perception-dependent reader (InspectTarget -> CreaturePickup's dwell, the
+            // physical probe, the approach dash) sees "nothing".
+            _activeTarget = (perceivedFree != null && !perceivedFree.IsInFlight) ? perceivedFree : null;
+
+            if (perceivedFree != null)
+            {
+                // Genuinely perceiving a free object (resting, rolling, or mid-flight - any of them).
+                // Keep a fresh snapshot of where it is so a coast can start from the last place we
+                // really saw it. For an in-flight object this snapshot is the ONLY thing it feeds.
+                if (perceivedFree != _lostFrom)
+                    _lostFromWasInFlight = false;      // new object -> fresh pursuit-kind latch
+                if (perceivedFree.IsInFlight)
+                    _lostFromWasInFlight = true;       // seen flying at least once this episode
+                _lastKnownTargetPos = perceivedFree.transform.position;
+                _lostFrom = perceivedFree;
+                _lost = false;
+                _lostTimer = 0f;
+            }
+            else if (_lostFrom != null && _perception.AttentionCooldownObject == _lostFrom)
+            {
+                // The Object Attention Budget just spent its episode on this object and put it on
+                // cooldown - it was given up on PURPOSE, not merely lost from view. Do not coast
+                // toward it, and drop any coast already heading there.
+                if (_lost)
+                    ClearLost();
+                else
+                    _lostFrom = null;
+            }
+            else
+            {
+                // Nothing perceived. If we were just watching a free object, coast to the last place
+                // we saw it for up to lostTargetGrace seconds. The object may still be physically in
+                // flight while we do this - fine, we are walking to a remembered point, not tracking
+                // it. Only IsHeld ends it early (someone caught / picked it up).
+                if (!_lost && _lostFrom != null && lostTargetGrace > 0f && !_lostFrom.IsHeld)
+                {
+                    _lost = true;
+                    _lostTimer = 0f;
+                }
+
+                if (_lost)
+                {
+                    _lostTimer += Time.deltaTime;
+                    if (_lostTimer >= lostTargetGrace || _lostFrom == null || _lostFrom.IsHeld)
+                        ClearLost();
+                }
+            }
 
             // Retreat always wins and ends any inspect session.
             if (_retreating)
@@ -203,6 +308,10 @@ namespace CreatureExperiment.Creature
             if (_activeTarget == null)
             {
                 _inspecting = false;
+                // No live target. If we just lost one, spend the grace walking to its last-known
+                // position; otherwise this is the plain "nothing to do" fall-through.
+                if (_lost)
+                    LostCoastStep();
                 return;
             }
 
@@ -306,6 +415,61 @@ namespace CreatureExperiment.Creature
                 transform.position += (toward / distance) * (EffectiveSpeed(approachSpeed) * Time.deltaTime);
         }
 
+        // Lost-target coast: walk toward the LAST position the object was actually perceived at. This
+        // is not tracking - the object is not perceived right now and re-acquisition happens on its
+        // own back in Update() the moment CreaturePerception attends to it again. Routed via
+        // CreatureNavLocomotion when present, straight otherwise, at the normal approach speed. Gives
+        // up on arrival; the grace timer in Update() handles the "never arrived" case.
+        private void LostCoastStep()
+        {
+            // Pursuit completion: the creature genuinely coasted after a MOVING object (it was seen
+            // in flight at least once this episode), that object has since slowed enough to no longer
+            // be in flight, and the coast has now brought the creature within interaction distance
+            // (approachStopDistance - the same gap Approach hands off to Inspect at) of where the
+            // object ACTUALLY is now. Treat the chase as succeeded: stop coasting and put THIS object
+            // on the same short autonomous-attention cooldown a spent budget uses, so it is not
+            // re-locked next frame. A still-in-flight object zipping past, a static object (never
+            // flagged in-flight), or one the creature never caught up to does not qualify.
+            if (_lostFrom != null && _lostFromWasInFlight
+                && !_lostFrom.IsHeld && !_lostFrom.IsInFlight)
+            {
+                Vector3 toObj = _lostFrom.transform.position - transform.position;
+                toObj.y = 0f;
+                if (toObj.magnitude <= approachStopDistance)
+                {
+                    _perception.ReportPursuitComplete(_lostFrom);
+                    ClearLost();
+                    return;
+                }
+            }
+
+            Vector3 toward = _lastKnownTargetPos - transform.position;
+            toward.y = 0f;
+            float distance = toward.magnitude;
+
+            if (distance <= lostArrivalDistance) // NOT approachStopDistance - the coast walks right up to the spot
+            {
+                ClearLost(); // reached where we last saw it and still nothing - give up
+                return;
+            }
+
+            if (_nav != null)
+                _nav.MoveToward(_lastKnownTargetPos, EffectiveSpeed(approachSpeed));
+            else
+                transform.position += (toward / distance) * (EffectiveSpeed(approachSpeed) * Time.deltaTime);
+        }
+
+        // End the lost-target coast and fall back to the plain idle / Wander fall-through. A fresh
+        // coast can only start after CreaturePerception attends to a free object again (which re-sets
+        // _lostFrom), so this never immediately re-triggers.
+        private void ClearLost()
+        {
+            _lost = false;
+            _lostTimer = 0f;
+            _lostFrom = null;
+            _lostFromWasInFlight = false;
+        }
+
         // Watch / move / watch around _activeTarget. Dwell still for a random time, then slide along
         // the ring (radius approachStopDistance) by a random angular hop to a new spot, then dwell
         // again. Position is always pinned to the ring, flat XZ; Y is never touched. The target's
@@ -373,6 +537,8 @@ namespace CreatureExperiment.Creature
             inspectMoveSpeed = Mathf.Max(0f, inspectMoveSpeed);
             inspectStepMin = Mathf.Max(0f, inspectStepMin);
             inspectStepMax = Mathf.Max(inspectStepMin, inspectStepMax);
+            lostTargetGrace = Mathf.Max(0f, lostTargetGrace);
+            lostArrivalDistance = Mathf.Max(0f, lostArrivalDistance);
         }
 
         private void OnDrawGizmosSelected()
@@ -386,6 +552,12 @@ namespace CreatureExperiment.Creature
             DrawFlatCircle(approachStopDistance);
             if (_activeTarget != null)
                 Gizmos.DrawLine(transform.position, _activeTarget.transform.position);
+            else if (_lost) // lost-target coast: dashed intent line to the last-known position
+            {
+                Gizmos.color = new Color(1f, 0.55f, 0.2f);
+                Gizmos.DrawLine(transform.position, _lastKnownTargetPos);
+                Gizmos.DrawWireSphere(_lastKnownTargetPos, 0.2f);
+            }
         }
 
         private void DrawFlatCircle(float radius)

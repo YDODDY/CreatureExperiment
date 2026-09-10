@@ -7,12 +7,15 @@ namespace CreatureExperiment.Creature
     /// The creature's first perception -> gaze loop.
     ///
     /// Perception: is the player within <see cref="perceptionRange"/> (flat XZ distance)?
-    /// Attention (0.1): among everything perceivable in range - the player plus every
-    /// <see cref="Interactable"/> the creature can actually SEE right now - pick the one whose flat
-    /// XZ distance to the creature is smallest, and gaze at its live position. Nothing perceivable
-    /// -> rest gaze. Among the candidates it is still distance only: no motion bias, no memory, no
-    /// per-type weighting, no switch cooldown - the only change from 0.1 is which Interactables get
-    /// into the candidate set (see below).
+    /// Attention (0.1): pick the nearest <see cref="Interactable"/> the creature can actually SEE
+    /// right now (flat XZ distance, over the range + FOV + LOS subset) and gaze at its live position.
+    /// Only when NO perceivable Interactable exists does the player become the gaze target (a
+    /// range-only fallback). This removes the earlier asymmetry where the player - being range-only,
+    /// no FOV / LOS - kept winning gaze off an Interactable that had merely drifted off-axis for a
+    /// frame. It is NOT the final attention design: still distance only among Interactables, no
+    /// motion bias, no memory, no per-type weighting, no switch cooldown, no score. Nothing
+    /// perceivable and no player in range -> rest gaze. <see cref="_forcePlayerGaze"/> (Probe) still
+    /// overrides all of this.
     ///
     /// Object visibility (0.2): an <see cref="Interactable"/> is a candidate only if it is within
     /// <see cref="perceptionRange"/>, inside the <see cref="fovAngle"/> cone measured from the
@@ -45,11 +48,39 @@ namespace CreatureExperiment.Creature
     /// body), and a small <see cref="pupil"/> then slides inside the eye toward the residual
     /// direction the head has not yet covered. Body rotation is still not part of this.
     ///
+    /// Gaze interruption (0.1) - the FIRST split of gaze target from behavioural target. While an
+    /// object is the attention target (<see cref="AttendedInteractable"/> != null) and a player who
+    /// is in range AND inside the current FOV cone moves faster than
+    /// <see cref="playerGazeMotionThreshold"/>, the creature GLANCES at that player for
+    /// <see cref="playerGazeInterruptDuration"/> s, then looks back at the object; another glance
+    /// cannot start for <see cref="playerGazeInterruptCooldown"/> s, so a continuously-moving player
+    /// gets an occasional flick, never a locked stare or a follow. This changes ONLY the gaze /
+    /// head / pupil aim: <see cref="AttendedInteractable"/>, <c>CreatureMovement._activeTarget</c>,
+    /// Approach, Inspect, Pickup dwell, the physical probe, the approach dash, lost-target state and
+    /// Nav movement are all untouched, and the attended object is FOV-exempted in
+    /// <see cref="SelectGazeTarget"/> for the glance so moving the gaze off it can never make
+    /// selection drop it. <see cref="_forcePlayerGaze"/> (Probe) still outranks it.
+    ///
+    /// Object attention budget (0.1) - a small lifetime on autonomous attention so the creature
+    /// cannot chase ONE moving object forever by re-acquiring it every time a lost coast re-finds
+    /// it. Attention to a given <see cref="Interactable"/> accumulates across one "episode" -
+    /// live -> lost coast -> re-acquire, all the same episode; it is NOT reset by re-seeing the same
+    /// object, by a gaze interruption, or by a lost gap. It IS frozen while a probe owns the gaze,
+    /// while the object is held, and while the creature is Approaching or Inspecting it (so a normal
+    /// investigate-then-pickup on a reachable object is never cut off - only watching an un-catchable
+    /// in-flight object and the lost coasts after it burn budget).
+    /// When <see cref="objectAttentionBudget"/> is spent the object is dropped and held out of
+    /// <see cref="SelectGazeTarget"/> (and out of <c>CreatureMovement</c>'s lost coast, via
+    /// <see cref="AttentionCooldownObject"/>) for <see cref="objectAttentionCooldown"/> s; other
+    /// Interactables and the player fallback are unaffected. A genuinely different object starts a
+    /// fresh episode.
+    ///
     /// Deliberately still tiny: FOV + LOS for objects only, and no memory, no object familiarity,
     /// no wander / search, no rig, no gaze framework, no target registry, no pathfinding, no
-    /// meaning/type judgement. <see cref="IsPlayerPerceived"/> stays a pure player-in-range test for
-    /// <c>CreatureMovement</c>; it is unaffected by the object FOV/LOS gate and by what the creature
-    /// is actually looking at.
+    /// meaning/type judgement, no behavioural interrupt / "what?" reaction / follow decision,
+    /// no boredom / personality, no per-object learning, no motion-based attention score.
+    /// <see cref="IsPlayerPerceived"/> stays a pure player-in-range test for <c>CreatureMovement</c>;
+    /// it is unaffected by the object FOV/LOS gate and by what the creature is actually looking at.
     /// </summary>
     public class CreaturePerception : MonoBehaviour
     {
@@ -97,6 +128,32 @@ namespace CreatureExperiment.Creature
         [Tooltip("Maps how far off-axis the gaze is to pupil travel. Higher = pupil reaches the rim sooner.")]
         [SerializeField] private float pupilGain = 0.6f;
 
+        [Header("Gaze interruption 0.1 (glance at a moving player, keep doing the object behaviour)")]
+        [Tooltip("Player flat (XZ) speed, m/s, above which a player crossing the FOV while the creature " +
+                 "is busy with an object earns a brief glance. A standing / slowly-adjusting player never " +
+                 "interrupts. Player walk speed is ~4 m/s for reference.")]
+        [SerializeField] private float playerGazeMotionThreshold = 1.5f;
+        [Tooltip("How long the glance at the player lasts, in seconds. GAZE ONLY - the object stays the " +
+                 "behavioural / attention target the whole time.")]
+        [SerializeField] private float playerGazeInterruptDuration = 0.5f;
+        [Tooltip("Minimum seconds of looking back at the object after a glance before another glance may " +
+                 "start. Stops a continuously-moving player from holding the gaze - an occasional flick, not a follow.")]
+        [SerializeField] private float playerGazeInterruptCooldown = 2.5f;
+
+        [Header("Object attention budget 0.1 (don't chase one moving object forever)")]
+        [Tooltip("Seconds of autonomous attention the creature will spend on ONE Interactable before " +
+                 "giving up on it. The timer accumulates across brief lost/re-acquire gaps (it is NOT " +
+                 "reset by re-seeing the same object) and while glancing at the player, but ONLY while " +
+                 "the creature is making no catch progress. It is FROZEN while Approaching or Inspecting " +
+                 "the object (a normal investigate-then-pickup on a reachable object is never cut off) " +
+                 "and while a probe or a hold is using it - only watching an un-catchable in-flight " +
+                 "object and the lost coasts after it keep burning budget.")]
+        [SerializeField] private float objectAttentionBudget = 7f;
+        [Tooltip("After the budget is spent, seconds that object is held OUT of autonomous " +
+                 "SelectGazeTarget candidacy so the creature does not instantly re-lock onto it. " +
+                 "Other Interactables and the player fallback are unaffected.")]
+        [SerializeField] private float objectAttentionCooldown = 2.5f;
+
         private Quaternion _defaultLocalRotation;
         private Vector3 _pupilRestLocalPos;
         private Interactable[] _interactables;
@@ -107,8 +164,46 @@ namespace CreatureExperiment.Creature
         // When the player is not perceived this falls back to the normal gaze - there is no search gaze.
         private bool _forcePlayerGaze;
 
+        // Sibling on the same GameObject (CreatureMovement RequireComponent's CreaturePerception).
+        // Read-only: while CreatureMovement is coasting to a lost object's last-known position,
+        // LostGazePoint is that world spot and the gaze is aimed there (see Update). This is NOT
+        // "the object is perceived" - AttendedInteractable / CurrentGazeTarget stay null.
+        private CreatureMovement _movement;
+
+        // Gaze interruption 0.1 state. GAZE ONLY: nothing here is read by CreatureMovement or any
+        // behaviour - it only briefly changes what CurrentGazeTarget / the FOV anchor point at.
+        private Vector3 _playerLastPos;         // for the player's frame-to-frame flat speed
+        private bool _gazeInterruptActive;     // currently glancing at the player
+        private float _gazeInterruptTimer;     // seconds left in the glance
+        private float _gazeInterruptCooldown;  // seconds left before another glance may start
+        private Interactable _interruptObject;  // the attended object the glance protects (FOV-exempt in SelectGazeTarget while active)
+
+        // Object attention budget 0.1 state. One attention "episode" per Interactable; spans
+        // live -> lost coast -> re-acquire without resetting. On expiry the object is dropped and
+        // held out of SelectGazeTarget for a cooldown.
+        private Interactable _episodeObject;         // the object the current episode is about, or null
+        private float _episodeElapsed;               // seconds of attention spent this episode
+        private Interactable _attentionCooldownObject; // the object currently excluded (budget spent), or null
+        private float _attentionCooldownTimer;       // seconds left on that exclusion
+
         /// <summary>Whether the player is currently within perception range. The seam <c>CreatureMovement</c> reads.</summary>
         public bool IsPlayerPerceived { get; private set; }
+
+        /// <summary>
+        /// The one Interactable currently held out of autonomous attention by the Object Attention
+        /// Budget (its episode just ran out), or null. It is excluded from <see cref="SelectGazeTarget"/>;
+        /// <c>CreatureMovement</c> also reads this so it never lost-coasts toward a deliberately-
+        /// abandoned object. Clears itself after <see cref="objectAttentionCooldown"/> seconds.
+        /// </summary>
+        public Interactable AttentionCooldownObject => _attentionCooldownObject;
+
+        // --- TEMPORARY diagnostic getters (Object Attention Budget). Read-only; safe to delete with
+        //     CreatureAttentionDebug. ---
+        public Interactable DebugEpisodeObject => _episodeObject;
+        public float DebugEpisodeElapsed => _episodeElapsed;
+        public float DebugObjectAttentionBudget => objectAttentionBudget;
+        public float DebugAttentionCooldownTimer => _attentionCooldownTimer;
+        public bool DebugForcePlayerGaze => _forcePlayerGaze;
 
         /// <summary>The player transform this component tracks, or null. Read-only seam for sibling components (e.g. movement).</summary>
         public Transform Player => player;
@@ -151,9 +246,14 @@ namespace CreatureExperiment.Creature
                 playerGazeTarget = cam != null ? cam.transform : player;
             }
 
+            if (player != null)
+                _playerLastPos = player.position; // seed so frame 1 does not read a bogus huge speed
+
             // Prototype scope: interactables are never spawned or destroyed at runtime, so one
             // lookup is enough. No registry, no per-frame scene search.
             _interactables = FindObjectsByType<Interactable>(FindObjectsSortMode.None);
+
+            _movement = GetComponent<CreatureMovement>();
         }
 
         /// <summary>
@@ -168,15 +268,48 @@ namespace CreatureExperiment.Creature
             IsPlayerPerceived = PerceivePlayer();
 
             // Selection still runs every frame so AttendedInteractable stays correct for
-            // CreatureMovement / CreaturePickup. The override below only changes what the creature
+            // CreatureMovement / CreaturePickup. The overrides below only change what the creature
             // looks at, not what it treats as its attention target.
             Transform selected = SelectGazeTarget();
 
-            CurrentGazeTarget = (_forcePlayerGaze && IsPlayerPerceived && player != null)
-                ? (playerGazeTarget != null ? playerGazeTarget : player)
-                : selected;
+            // Age the current attention episode and, if its budget is spent, put that object on a
+            // brief cooldown (excluded from the next SelectGazeTarget). Runs after SelectGazeTarget so
+            // it sees this frame's AttendedInteractable.
+            UpdateAttentionBudget();
 
-            UpdateGazeDirection(CurrentGazeTarget);
+            // Decide whether the creature glances at a moving player (gaze only - see the method).
+            // Runs after SelectGazeTarget so it sees this frame's AttendedInteractable.
+            UpdateGazeInterrupt();
+
+            // Gaze priority:
+            //   1. a probe's forced player-gaze (only while the player is actually perceived),
+            //   2. a gaze interruption - a brief glance at a moving player while an object stays the
+            //      behavioural target (nothing behavioural changes; the object is FOV-exempt during it),
+            //   3. the perceived object / player-as-fallback that SelectGazeTarget picked,
+            //   4. ONLY when 1-3 are empty - CreatureMovement's lost-object last-known position,
+            //   5. otherwise nothing -> ease back to rest.
+            // Cases 2 and 4 leave CurrentGazeTarget conceptually about "where the head points", not
+            // "what is perceived": in case 2 AttendedInteractable is still the object, in case 4 it is null.
+            Vector3? lostGazePoint = null;
+            if (_forcePlayerGaze && IsPlayerPerceived && player != null)
+            {
+                CurrentGazeTarget = playerGazeTarget != null ? playerGazeTarget : player;
+            }
+            else if (_gazeInterruptActive && AttendedInteractable != null && player != null)
+            {
+                CurrentGazeTarget = playerGazeTarget != null ? playerGazeTarget : player;
+            }
+            else if (selected != null)
+            {
+                CurrentGazeTarget = selected;
+            }
+            else
+            {
+                CurrentGazeTarget = null;
+                lostGazePoint = _movement != null ? _movement.LostGazePoint : null;
+            }
+
+            UpdateGazeDirection(CurrentGazeTarget, lostGazePoint);
             UpdateHead();
             UpdatePupil();
         }
@@ -191,25 +324,19 @@ namespace CreatureExperiment.Creature
             return flat.sqrMagnitude <= perceptionRange * perceptionRange;
         }
 
-        // Attention 0.1: nearest perceivable candidate by flat XZ distance. The player is one
-        // candidate (measured at its root, looked at via playerGazeTarget); every Interactable is
-        // a candidate (measured and looked at via its own transform). Null when nothing is in range.
+        // Attention: nearest perceivable Interactable wins; the player is only a fallback when there
+        // is none. Both are measured by the same flat XZ distance; the Interactable is gated by
+        // range + FOV cone + LOS (CanPerceiveInteractable), the player fallback by range only.
+        // Null when no Interactable is perceivable and the player is out of range.
         private Transform SelectGazeTarget()
         {
             float rangeSqr = perceptionRange * perceptionRange;
+
+            // 1. Nearest Interactable that passes the full gate. An object the creature can actually
+            //    see always outranks the player for gaze/attention at this stage.
             float bestSqr = float.MaxValue;
             Transform best = null;
             Interactable bestInteractable = null;
-
-            if (player != null)
-            {
-                float sqr = FlatSqrDistance(player.position);
-                if (sqr <= rangeSqr && sqr < bestSqr)
-                {
-                    bestSqr = sqr;
-                    best = playerGazeTarget != null ? playerGazeTarget : player;
-                }
-            }
 
             if (_interactables != null)
             {
@@ -218,10 +345,18 @@ namespace CreatureExperiment.Creature
                     if (it == null)
                         continue;
 
-                    // 0.2 addition: the object must be in range, in the FOV cone and not occluded.
-                    // Everything below this line is the unchanged 0.1 nearest-by-flat-distance pick,
-                    // just over the visible subset.
-                    if (!CanPerceiveInteractable(it))
+                    // Object Attention Budget: an object that just spent its attention episode is
+                    // briefly not an autonomous candidate, so the creature does not re-lock onto it
+                    // the instant it looks back. Other objects and the player fallback are unaffected.
+                    if (it == _attentionCooldownObject)
+                        continue;
+
+                    // Range + FOV cone + LOS. Below this line it is a pure nearest-by-flat-distance
+                    // pick over the visible subset. While a gaze interruption is glancing at the
+                    // player, the object that glance is protecting keeps its attention on range + LOS
+                    // only - deliberately moving the GAZE off it must never make selection drop it.
+                    bool skipFov = _gazeInterruptActive && it == _interruptObject;
+                    if (!CanPerceiveInteractable(it, skipFov))
                         continue;
 
                     float sqr = FlatSqrDistance(it.transform.position);
@@ -234,9 +369,15 @@ namespace CreatureExperiment.Creature
                 }
             }
 
-            // bestInteractable is always the one whose transform is 'best', or null when the player
-            // (checked first, above) or nothing won. Recorded as a read-only seam; selection itself
-            // is unchanged - still pure nearest-by-flat-distance.
+            // 2. Only when no perceivable Interactable won: fall back to the player, range-only (no
+            //    FOV / LOS), exactly the old player test. This is what stops the player from stealing
+            //    gaze off an Interactable that briefly left the cone.
+            if (bestInteractable == null && player != null)
+            {
+                if (FlatSqrDistance(player.position) <= rangeSqr)
+                    best = playerGazeTarget != null ? playerGazeTarget : player;
+            }
+
             AttendedInteractable = bestInteractable;
             return best;
         }
@@ -248,13 +389,191 @@ namespace CreatureExperiment.Creature
             return flat.sqrMagnitude;
         }
 
+        // Object Attention Budget 0.1: age the current attention episode and, when its budget is
+        // spent, drop the object and hold it out of SelectGazeTarget for a cooldown. Purpose: the
+        // creature must not chase ONE moving object forever by re-acquiring it every time a lost
+        // coast re-finds it. Runs each Update after SelectGazeTarget.
+        //
+        // Episode identity spans "live -> lost coast -> re-acquire": the episode object is
+        // AttendedInteractable, or - to bridge a brief lost gap without a reset - the object
+        // CreatureMovement is lost-coasting toward. It is a fresh episode only when attention moves
+        // to a genuinely different object (or after a full give-up).
+        //
+        // Not counted against the budget: time while a probe owns the gaze (a deliberate use of an
+        // object), time while the object is held, and time while the creature is actually Inspecting
+        // it (it has caught up - a normal investigate-then-pickup is never cut off; only the chase is).
+        private void UpdateAttentionBudget()
+        {
+            float dt = Time.deltaTime;
+
+            if (_attentionCooldownTimer > 0f)
+            {
+                _attentionCooldownTimer -= dt;
+                if (_attentionCooldownTimer <= 0f)
+                    _attentionCooldownObject = null;
+            }
+
+            // A probe is deliberately using an object right now - freeze the whole budget (do not
+            // accumulate, expire, or reset). It resumes exactly where it was when the probe ends.
+            if (_forcePlayerGaze)
+                return;
+
+            Interactable attn = AttendedInteractable;
+            if (attn == null && _movement != null)
+                attn = _movement.LostTargetInteractable; // bridge a lost coast without resetting
+            if (attn != null && attn.IsHeld)
+                attn = null;                             // a held object is not autonomous watching
+
+            if (attn == null || attn == _attentionCooldownObject)
+            {
+                // No episode subject this frame (nothing attended / coasted, or it is the object we
+                // just abandoned). End the episode; the cooldown timer above keeps running.
+                _episodeObject = null;
+                _episodeElapsed = 0f;
+                return;
+            }
+
+            if (attn != _episodeObject)
+            {
+                // First episode, or attention genuinely moved to a different object.
+                _episodeObject = attn;
+                _episodeElapsed = 0f;
+                return;
+            }
+
+            // Same object, same episode. Accumulate ONLY while the creature is making no catch
+            // progress - i.e. it is NOT walking toward the object (Approach) and NOT orbiting it
+            // (Inspect). Those two phases mean the object is reachable and being dealt with normally
+            // (a stationary-Cube investigate-then-pickup is never cut off); what keeps burning budget
+            // is watching an un-catchable in-flight object and the lost coasts that follow it.
+            if (_movement != null && (_movement.IsApproaching || _movement.IsInspecting))
+                return;
+
+            _episodeElapsed += dt;
+            if (_episodeElapsed >= objectAttentionBudget)
+            {
+                _attentionCooldownObject = _episodeObject;
+                _attentionCooldownTimer = objectAttentionCooldown;
+                _episodeObject = null;
+                _episodeElapsed = 0f;
+            }
+        }
+
+        /// <summary>
+        /// <c>CreatureMovement</c> calls this when it judges a MOVING-object pursuit succeeded - it
+        /// coasted after the object and caught up to within interaction distance. Puts that ONE
+        /// object on the same brief autonomous-attention cooldown a spent budget uses
+        /// (<see cref="objectAttentionCooldown"/> s, via <see cref="_attentionCooldownObject"/>), so
+        /// the creature does not immediately re-acquire and chase it again. Other Interactables and
+        /// the player fallback are unaffected. Does not touch any movement / probe / observe state.
+        /// </summary>
+        public void ReportPursuitComplete(Interactable obj)
+        {
+            if (obj == null)
+                return;
+
+            _attentionCooldownObject = obj;
+            _attentionCooldownTimer = objectAttentionCooldown;
+            if (_episodeObject == obj)
+            {
+                _episodeObject = null;
+                _episodeElapsed = 0f;
+            }
+        }
+
+        // Gaze interruption 0.1: decide whether the creature briefly glances at a moving player while
+        // it is busy with an object. GAZE ONLY - this reads AttendedInteractable / player motion / the
+        // FOV cone and writes only the interrupt timers + _interruptObject. It never writes
+        // AttendedInteractable and nothing behavioural ever reads it. Runs each Update right after
+        // SelectGazeTarget (so AttendedInteractable is this frame's) and before the gaze is resolved.
+        private void UpdateGazeInterrupt()
+        {
+            float dt = Time.deltaTime;
+
+            // Player's flat (XZ) speed this frame.
+            float playerSpeed = 0f;
+            if (player != null)
+            {
+                if (dt > 0f)
+                {
+                    Vector3 d = player.position - _playerLastPos;
+                    d.y = 0f;
+                    playerSpeed = d.magnitude / dt;
+                }
+                _playerLastPos = player.position;
+            }
+
+            // Already glancing: run the timer down. End early (and start the cooldown) if there is no
+            // longer the SAME object to look back at - it left perception, or attention moved on.
+            if (_gazeInterruptActive)
+            {
+                _gazeInterruptTimer -= dt;
+                if (_gazeInterruptTimer <= 0f
+                    || AttendedInteractable == null
+                    || AttendedInteractable != _interruptObject)
+                {
+                    _gazeInterruptActive = false;
+                    _gazeInterruptTimer = 0f;
+                    _interruptObject = null;
+                    _gazeInterruptCooldown = playerGazeInterruptCooldown;
+                }
+                return;
+            }
+
+            // Looking back at the object after a glance: no new glance until the cooldown elapses.
+            if (_gazeInterruptCooldown > 0f)
+            {
+                _gazeInterruptCooldown -= dt;
+                return;
+            }
+
+            // May a fresh glance start? ALL of:
+            //  - a probe is not already forcing the gaze (it outranks this);
+            //  - there is an object attention target to keep and return to;
+            //  - the player is in perception range AND inside the current FOV cone;
+            //  - the player is actually moving, not just standing / drifting.
+            if (_forcePlayerGaze) return;
+            if (AttendedInteractable == null) return;
+            if (player == null || !IsPlayerPerceived) return;
+            if (playerSpeed < playerGazeMotionThreshold) return;
+            if (!IsPlayerInFov()) return;
+
+            _interruptObject = AttendedInteractable;
+            _gazeInterruptTimer = playerGazeInterruptDuration;
+            _gazeInterruptActive = true;
+        }
+
+        // Is the player inside the same fovAngle cone (around facingReference's flattened forward)
+        // that gates Interactables? Used only to decide a gaze interruption - no LOS test, a glance
+        // follows a movement the creature would catch in the corner of its eye.
+        private bool IsPlayerInFov()
+        {
+            if (player == null)
+                return false;
+
+            Vector3 flat = player.position - transform.position;
+            flat.y = 0f;
+            if (flat.sqrMagnitude < 1e-4f)
+                return true;
+
+            Transform face = facingReference != null ? facingReference : transform;
+            Vector3 facing = face.forward;
+            facing.y = 0f;
+            if (facing.sqrMagnitude < 1e-6f)
+                return false;
+
+            return Vector3.Angle(facing, flat) <= fovAngle * 0.5f;
+        }
+
         /// <summary>
         /// The 0.2 object-visibility gate: range (flat XZ, same limit as the player check) AND inside
         /// the <see cref="fovAngle"/> cone around <see cref="facingReference"/>'s flattened forward
         /// AND a clear line of sight from the eye. Applied to Interactables only; never to the player.
         /// Also used by the gizmos so the Scene view matches what selection actually sees.
+        /// <paramref name="skipFov"/> drops only the cone test (range + LOS still apply): used for the
+        /// one object a gaze interruption is protecting while the gaze is deliberately elsewhere.
         /// </summary>
-        private bool CanPerceiveInteractable(Interactable it)
+        private bool CanPerceiveInteractable(Interactable it, bool skipFov = false)
         {
             Vector3 flat = it.transform.position - transform.position;
             flat.y = 0f;
@@ -264,7 +583,7 @@ namespace CreatureExperiment.Creature
 
             // FOV: angle between the creature's flattened facing and the flat direction to the target.
             // Skipped only when the target is basically on top of the creature (direction undefined).
-            if (distSqr > 1e-4f)
+            if (!skipFov && distSqr > 1e-4f)
             {
                 Transform face = facingReference != null ? facingReference : transform;
                 Vector3 facing = face.forward;
@@ -288,8 +607,9 @@ namespace CreatureExperiment.Creature
             return true;
         }
 
-        // Eases lookPivot toward the chosen target (or back to default). Unchanged behaviour.
-        private void UpdateGazeDirection(Transform target)
+        // Eases lookPivot toward the chosen target, else a lost object's last-known world point
+        // (CreatureMovement's coast - not a perceived target), else back to default.
+        private void UpdateGazeDirection(Transform target, Vector3? worldPoint = null)
         {
             Quaternion desired;
 
@@ -298,6 +618,13 @@ namespace CreatureExperiment.Creature
                 Vector3 dir = target.position - lookPivot.position;
                 if (dir.sqrMagnitude < 0.0001f)
                     return; // target essentially on the pivot; hold this frame
+                desired = Quaternion.LookRotation(dir);
+            }
+            else if (worldPoint.HasValue)
+            {
+                Vector3 dir = worldPoint.Value - lookPivot.position;
+                if (dir.sqrMagnitude < 0.0001f)
+                    return; // point essentially on the pivot; hold this frame
                 desired = Quaternion.LookRotation(dir);
             }
             else
@@ -362,6 +689,11 @@ namespace CreatureExperiment.Creature
         {
             perceptionRange = Mathf.Max(0f, perceptionRange);
             fovAngle = Mathf.Clamp(fovAngle, 1f, 360f);
+            playerGazeMotionThreshold = Mathf.Max(0f, playerGazeMotionThreshold);
+            playerGazeInterruptDuration = Mathf.Max(0.05f, playerGazeInterruptDuration);
+            playerGazeInterruptCooldown = Mathf.Max(0f, playerGazeInterruptCooldown);
+            objectAttentionBudget = Mathf.Max(0.5f, objectAttentionBudget);
+            objectAttentionCooldown = Mathf.Max(0f, objectAttentionCooldown);
         }
 
         private void OnDrawGizmosSelected()
