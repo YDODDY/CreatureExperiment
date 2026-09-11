@@ -44,6 +44,15 @@ namespace CreatureExperiment.Player
         private Vector3 _velocity;
         private bool _isCrouching;
 
+        /// <summary>True while the Player is in the crouched movement state (Crouch held and not currently blocked from standing). Read-only seam for other systems (e.g. Hearing 0.1's movement sound emitter) - crouch logic itself is unchanged.</summary>
+        public bool IsCrouching => _isCrouching;
+
+        /// <summary>True while the Sprint action is held. This project has no separate "Dash" action - Sprint IS the fast-movement tier; see PlayerMovementSoundEmitter for how Hearing 0.1 treats this as its Dash tier.</summary>
+        public bool IsSprinting => _sprintAction != null && _sprintAction.IsPressed();
+
+        /// <summary>True for exactly the one Update() frame a jump was actually triggered (mirrors the InputAction.WasPressedThisFrame one-frame-pulse idiom already used below) - a one-shot edge for "a jump just happened", not a continuous "is airborne" state. Movement itself is unaffected by this property; it only mirrors the existing trigger condition for read-only seams.</summary>
+        public bool JumpedThisFrame { get; private set; }
+
         private void Awake()
         {
             _controller = GetComponent<CharacterController>();
@@ -76,6 +85,7 @@ namespace CreatureExperiment.Player
         private void Update()
         {
             float dt = Time.deltaTime;
+            JumpedThisFrame = false; // reset each frame; set true below only if a jump actually triggers this frame
 
             UpdateCrouchState();
             UpdateHeight(dt);
@@ -94,7 +104,10 @@ namespace CreatureExperiment.Player
                 _velocity.y = -2f;
 
             if (grounded && !_isCrouching && _jumpAction.WasPressedThisFrame())
+            {
                 _velocity.y = Mathf.Sqrt(-2f * gravity * jumpHeight);
+                JumpedThisFrame = true;
+            }
 
             _velocity.y += gravity * dt;
 

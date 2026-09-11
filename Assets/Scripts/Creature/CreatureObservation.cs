@@ -124,6 +124,23 @@ namespace CreatureExperiment.Creature
         private CreatureMemory _memory;
         private CreaturePattern _pattern;
 
+        /// <summary>
+        /// Monotonically increasing count of every confirmed Player-thrown-object HIT on this creature
+        /// (the exact <see cref="OnCollisionEnter"/> edge below - never decreases, never re-fires for
+        /// the same throw's continued physics contact, since the object is removed from
+        /// <see cref="_watchedThrows"/> on the same call). A read-only seam for a future consumer (e.g.
+        /// a Player-salience arbiter) to detect a NEW hit via a simple snapshot-and-compare, the same
+        /// idiom as PlayerObservation's HighViewEpisodeSerial. Adds no new detection - this is the
+        /// SAME hit edge <see cref="OnCollisionEnter"/> already used for Memory/Pattern.
+        /// </summary>
+        public int ThrowHitSerial { get; private set; }
+
+        /// <summary>World position of the most recent confirmed throw HIT. Meaningless before the first one.</summary>
+        public Vector3 LastHitPosition { get; private set; }
+
+        /// <summary>The Interactable involved in the most recent confirmed throw HIT.</summary>
+        public Interactable LastHitInteractable { get; private set; }
+
         private void Awake()
         {
             _memory = GetComponent<CreatureMemory>();
@@ -239,6 +256,13 @@ namespace CreatureExperiment.Creature
             // Flight resolved by a hit - it's a normal world object again. (A miss instead resolves in
             // FixedUpdate once the object comes to rest.)
             interactable.SetInFlight(false);
+
+            // The one HIT edge - see ThrowHitSerial's doc comment. Set here, once, same call as
+            // everything else below; a multi-frame physics contact from the same throw never reaches
+            // this line again (the object was just removed from _watchedThrows above).
+            ThrowHitSerial++;
+            LastHitPosition = interactable.transform.position;
+            LastHitInteractable = interactable;
 
             float distance = FlatDistance(interactable.transform.position);
             var observation = new Observation(

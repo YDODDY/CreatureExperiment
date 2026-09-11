@@ -75,6 +75,15 @@ namespace CreatureExperiment.Creature
     /// Interactables and the player fallback are unaffected. A genuinely different object starts a
     /// fresh episode.
     ///
+    /// Auditory orient (Hearing 0.1) - a SECOND, independent gaze-only channel, this time driven by
+    /// <c>CreatureHearing</c> via <see cref="SetAuditoryOrientPoint"/> rather than by this component's
+    /// own perception. A heard sound can steal the gaze toward its position for a brief,
+    /// CreatureHearing-timed span, FOV-exempting the attended object exactly like the Player gaze
+    /// interruption above and for the identical reason. It sits below that interruption and the
+    /// Probe's forced gaze, but above just continuing to look at an object - see <see cref="Update"/>.
+    /// <see cref="IsPlayerPerceived"/> (this component's own visual/range perception) is never written
+    /// by Hearing - hearing a sound is evidence of a sound, not player identification.
+    ///
     /// Deliberately still tiny: FOV + LOS for objects only, and no memory, no object familiarity,
     /// no wander / search, no rig, no gaze framework, no target registry, no pathfinding, no
     /// meaning/type judgement, no behavioural interrupt / "what?" reaction / follow decision,
@@ -178,6 +187,22 @@ namespace CreatureExperiment.Creature
         private float _gazeInterruptCooldown;  // seconds left before another glance may start
         private Interactable _interruptObject;  // the attended object the glance protects (FOV-exempt in SelectGazeTarget while active)
 
+        // Hearing 0.1 auditory orient - gaze-only integration seam. CreatureHearing calls
+        // SetAuditoryOrientPoint every frame; this component never initiates or times the orient
+        // itself, it only aims the gaze at the point while one is set and (mirroring _interruptObject
+        // above) FOV-exempts whatever was attended when the orient began, for the identical reason.
+        private Vector3? _auditoryOrientPoint;
+        private bool _auditoryOrientWasActive;
+        private Interactable _auditoryProtectedObject;
+
+        // Player Salience 0.1 - a THIRD, independent gaze-only seam, same shape as auditory orient
+        // just above: PlayerSalience calls SetSalienceObservePoint every frame while its
+        // PlayerAttentionLevel is Observe; this component never computes salience or decides when to
+        // hold it, it only aims the gaze and FOV-exempts the attended object while told to.
+        private Vector3? _salienceObservePoint;
+        private bool _salienceObserveWasActive;
+        private Interactable _salienceProtectedObject;
+
         // Object attention budget 0.1 state. One attention "episode" per Interactable; spans
         // live -> lost coast -> re-acquire without resetting. On expiry the object is dropped and
         // held out of SelectGazeTarget for a cooldown.
@@ -263,6 +288,33 @@ namespace CreatureExperiment.Creature
         /// </summary>
         public void SetForcePlayerGaze(bool on) => _forcePlayerGaze = on;
 
+        /// <summary>
+        /// Hearing 0.1 (<c>CreatureHearing</c>) only: aim the gaze at <paramref name="point"/> for as
+        /// long as it keeps calling this with a non-null value each frame; pass null the instant the
+        /// orient should end. GAZE ONLY - never touches <see cref="AttendedInteractable"/>,
+        /// <c>CreatureMovement</c>'s Approach/Inspect target, or any Probe/Wander state. Sits below the
+        /// Probe force-gaze and the Player gaze-interruption in priority (see <see cref="Update"/>) and
+        /// above the normal selected object - "a heard sound briefly steals the gaze from whatever the
+        /// creature was looking at, but never overrides an explicit Probe, and never cancels the
+        /// underlying behaviour target". All timing/hysteresis/refresh logic lives in
+        /// <c>CreatureHearing</c>; this is a pure actuator seam, the same shape as
+        /// <see cref="SetForcePlayerGaze"/>.
+        /// </summary>
+        public void SetAuditoryOrientPoint(Vector3? point) => _auditoryOrientPoint = point;
+
+        /// <summary>
+        /// Player Salience 0.1 (<c>PlayerSalience</c>) only: aim the gaze at <paramref name="point"/>
+        /// (the Player's position) for as long as it keeps calling this with a non-null value -
+        /// typically for as long as <c>PlayerSalience.AttentionLevel</c> is Observe, which can be many
+        /// seconds. GAZE ONLY, identical shape and guarantees to <see cref="SetAuditoryOrientPoint"/>:
+        /// never touches <see cref="AttendedInteractable"/>, <c>CreatureMovement</c>'s Approach/Inspect
+        /// target, Wander, PlayerObserve, or any Probe state - a highly-salient Player wins the GAZE,
+        /// not the underlying behaviour. Sits below the Probe's forced gaze but above the (shorter)
+        /// Player gaze-interruption and auditory orient - see <see cref="Update"/> - since a sustained
+        /// Observe decision should not itself flicker against those brief triggers.
+        /// </summary>
+        public void SetSalienceObservePoint(Vector3? point) => _salienceObservePoint = point;
+
         private void Update()
         {
             IsPlayerPerceived = PerceivePlayer();
@@ -281,23 +333,59 @@ namespace CreatureExperiment.Creature
             // Runs after SelectGazeTarget so it sees this frame's AttendedInteractable.
             UpdateGazeInterrupt();
 
+            // Auditory orient bookkeeping (Hearing 0.1): on the rising edge of CreatureHearing setting
+            // a point, snapshot whatever is attended right now so SelectGazeTarget can FOV-exempt it
+            // (see there) - identical reasoning to _interruptObject above, just for this second,
+            // independent gaze override.
+            if (_auditoryOrientPoint.HasValue && !_auditoryOrientWasActive)
+                _auditoryProtectedObject = AttendedInteractable;
+            else if (!_auditoryOrientPoint.HasValue)
+                _auditoryProtectedObject = null;
+            _auditoryOrientWasActive = _auditoryOrientPoint.HasValue;
+
+            // Salience-observe bookkeeping (Player Salience 0.1): identical rising-edge snapshot, a
+            // THIRD independent gaze override.
+            if (_salienceObservePoint.HasValue && !_salienceObserveWasActive)
+                _salienceProtectedObject = AttendedInteractable;
+            else if (!_salienceObservePoint.HasValue)
+                _salienceProtectedObject = null;
+            _salienceObserveWasActive = _salienceObservePoint.HasValue;
+
             // Gaze priority:
             //   1. a probe's forced player-gaze (only while the player is actually perceived),
-            //   2. a gaze interruption - a brief glance at a moving player while an object stays the
+            //   2. a Player Salience "Observe" hold (0.1) - a sustained look at the Player while an
+            //      object stays the behavioural target (FOV-exempt, same treatment as case 3 below).
+            //      Sits below an explicit Probe but above the brief triggers in cases 3-4, so a
+            //      standing Observe decision does not itself flicker against them.
+            //   3. a gaze interruption - a brief glance at a moving player while an object stays the
             //      behavioural target (nothing behavioural changes; the object is FOV-exempt during it),
-            //   3. the perceived object / player-as-fallback that SelectGazeTarget picked,
-            //   4. ONLY when 1-3 are empty - CreatureMovement's lost-object last-known position,
-            //   5. otherwise nothing -> ease back to rest.
-            // Cases 2 and 4 leave CurrentGazeTarget conceptually about "where the head points", not
-            // "what is perceived": in case 2 AttendedInteractable is still the object, in case 4 it is null.
+            //   4. an auditory orient (Hearing 0.1) - a brief glance toward a heard sound's position
+            //      while an object stays the behavioural target (same FOV-exempt treatment as case 3).
+            //      Sits below an explicit Probe/glance/Observe but above just continuing to look at an
+            //      object - "a heard sound is worth a glance, never worth abandoning what you were doing".
+            //   5. the perceived object / player-as-fallback that SelectGazeTarget picked,
+            //   6. ONLY when 1-5 are empty - CreatureMovement's lost-object last-known position,
+            //   7. otherwise nothing -> ease back to rest.
+            // Cases 2-4 and 6 leave CurrentGazeTarget conceptually about "where the head points", not
+            // "what is perceived": AttendedInteractable is untouched by any of them.
             Vector3? lostGazePoint = null;
             if (_forcePlayerGaze && IsPlayerPerceived && player != null)
             {
                 CurrentGazeTarget = playerGazeTarget != null ? playerGazeTarget : player;
             }
+            else if (_salienceObservePoint.HasValue)
+            {
+                CurrentGazeTarget = null;
+                lostGazePoint = _salienceObservePoint; // UpdateGazeDirection's worldPoint param - see below
+            }
             else if (_gazeInterruptActive && AttendedInteractable != null && player != null)
             {
                 CurrentGazeTarget = playerGazeTarget != null ? playerGazeTarget : player;
+            }
+            else if (_auditoryOrientPoint.HasValue)
+            {
+                CurrentGazeTarget = null;
+                lostGazePoint = _auditoryOrientPoint; // UpdateGazeDirection's worldPoint param - see below
             }
             else if (selected != null)
             {
@@ -352,10 +440,14 @@ namespace CreatureExperiment.Creature
                         continue;
 
                     // Range + FOV cone + LOS. Below this line it is a pure nearest-by-flat-distance
-                    // pick over the visible subset. While a gaze interruption is glancing at the
-                    // player, the object that glance is protecting keeps its attention on range + LOS
-                    // only - deliberately moving the GAZE off it must never make selection drop it.
-                    bool skipFov = _gazeInterruptActive && it == _interruptObject;
+                    // pick over the visible subset. While a gaze interruption, an auditory orient
+                    // (Hearing 0.1), OR a salience observe hold (Player Salience 0.1) is glancing
+                    // elsewhere, the object whichever one is protecting keeps its attention on
+                    // range + LOS only - deliberately moving the GAZE off it must never make selection
+                    // drop it.
+                    bool skipFov = (_gazeInterruptActive && it == _interruptObject)
+                                   || (_auditoryOrientPoint.HasValue && it == _auditoryProtectedObject)
+                                   || (_salienceObservePoint.HasValue && it == _salienceProtectedObject);
                     if (!CanPerceiveInteractable(it, skipFov))
                         continue;
 

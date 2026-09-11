@@ -133,6 +133,14 @@ GameObject:
   - component: {fileID: 1000004}
   - component: {fileID: 1000005}
   - component: {fileID: 8300080}
+  - component: {fileID: 8300086}
+  - component: {fileID: 8300085}
+  - component: {fileID: 8300084}
+  - component: {fileID: 8300083}
+  - component: {fileID: 8300082}
+  - component: {fileID: 8300081}
+  - component: {fileID: 8300088}
+  - component: {fileID: 8300087}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -612,6 +620,10 @@ GameObject:
   - component: {fileID: 6000312}
   - component: {fileID: 6000313}
   - component: {fileID: 6000314}
+  - component: {fileID: 6000316}
+  - component: {fileID: 6000315}
+  - component: {fileID: 6000318}
+  - component: {fileID: 6000317}
   m_Layer: 0
   m_Name: Creature_Placeholder
   m_TagString: Untagged
@@ -628,7 +640,7 @@ Transform:
   m_GameObject: {fileID: 6000030}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1.1, z: 3}
+  m_LocalPosition: {x: -7, y: 1.1, z: 40}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -2133,6 +2145,93 @@ MonoBehaviour:
   navActive: 0
   progressing: 0
   remaining: 0
+--- !u!114 &6000315
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c9175dec0096f34c9960cc9cee9837b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Perception.CreatureHearingHUD
+  hearing: {fileID: 0}
+  emitter: {fileID: 0}
+  text: {fileID: 0}
+  showDebug: 1
+  alsoDrawOnGUI: 1
+  onGuiFontSize: 14
+--- !u!114 &6000316
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8beb2897137fe2a47904fe6e52ac6dc0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Perception.CreatureHearing
+  emitter: {fileID: 0}
+  perception: {fileID: 0}
+  maxHearingRange: 16
+  auditoryOrientDuration: 0.7
+  refreshIntensityMargin: 0.1
+  recentWindowSeconds: 1.5
+--- !u!114 &6000317
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 166da0872747f0e45b67d65b64bd5184, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Brain.PlayerSalienceHUD
+  salience: {fileID: 0}
+  text: {fileID: 0}
+  showDebug: 1
+  alsoDrawOnGUI: 1
+  onGuiFontSize: 14
+--- !u!114 &6000318
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6000030}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3cea5f58c22d24d48b7ac7cb419494db, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Brain.PlayerSalience
+  perception: {fileID: 0}
+  hearing: {fileID: 0}
+  observation: {fileID: 0}
+  encounter: {fileID: 0}
+  footstepBonusMin: 0.12
+  footstepBonusMax: 0.3
+  footstepIntensityReferenceMin: 0.25
+  footstepIntensityReferenceMax: 0.9
+  jumpBonus: 0.35
+  visualAcquireBonus: 0.45
+  throwHitBonus: 1
+  veryCloseDistance: 2.5
+  veryCloseFloor: 0.35
+  fastApproachSpeed: 2
+  fastApproachFloor: 0.3
+  decayPerSecond: 0.25
+  glanceEnterScore: 0.35
+  glanceExitScore: 0.2
+  observeEnterScore: 0.65
+  observeExitScore: 0.5
+  minimumObserveDuration: 2.5
+  throwHitAttentionHold: 4
 --- !u!1 &8000010
 GameObject:
   m_ObjectHideFlags: 0
@@ -6383,6 +6482,189 @@ MonoBehaviour:
   useMask:
     serializedVersion: 2
     m_Bits: 4294967295
+--- !u!114 &8300081
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4a552be6febe29c4abaf9c63243bf6e3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Brain.ReactionEpisodeHUD
+  recorder: {fileID: 0}
+  text: {fileID: 0}
+  showDebug: 1
+  alsoDrawOnGUI: 1
+  onGuiFontSize: 14
+--- !u!114 &8300082
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 531712372fe2569478fc0397959aad01, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Brain.ReactionEpisodeRecorder
+  playerObservation: {fileID: 0}
+  creatureEncounter: {fileID: 0}
+  creaturePerception: {fileID: 0}
+  reactionEnterRange: 5
+  reactionExitRange: 7
+  beforeWindowSeconds: 2
+  afterWindowSeconds: 3
+--- !u!114 &8300083
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 293d5e41ad7204d459bdeb1f919c5b39, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Brain.PlayerObservationHUD
+  observation: {fileID: 0}
+  text: {fileID: 0}
+  showDebug: 1
+  alsoDrawOnGUI: 1
+  onGuiFontSize: 14
+--- !u!114 &8300084
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dca698c4a31a51f42875c2f007492cf9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Brain.PlayerObservation
+  playerRoot: {fileID: 0}
+  viewTransform: {fileID: 0}
+  baselineWindowSeconds: 10
+  shortViewWindowSeconds: 0.35
+  baselineWarmupSeconds: 3
+  stillSpeedThreshold: 0.1
+  teleportSpeedGuard: 20
+  minimumBaselineForRatio: 10
+  minimumHighViewSpeed: 180
+  highViewMultiplier: 2.5
+  minimumHighViewReleaseSpeed: 100
+  highViewReleaseMultiplier: 1.5
+  minimumBaselineForLowView: 40
+  lowViewRatio: 0.25
+  lowViewMinDuration: 0.4
+  lowViewReleaseRatio: 0.5
+--- !u!114 &8300085
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 46a92a7babc70fb49baf9e49c75b5aca, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Brain.CreatureEncounterObservationHUD
+  encounter: {fileID: 0}
+  text: {fileID: 0}
+  showDebug: 1
+  alsoDrawOnGUI: 1
+  onGuiFontSize: 14
+  onGuiTopOffset: 320
+--- !u!114 &8300086
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 610f4a20a9bd2a04fbfe28ea33b10e4d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Brain.CreatureEncounterObservation
+  playerRoot: {fileID: 0}
+  playerViewTransform: {fileID: 0}
+  creatureTransform: {fileID: 0}
+  creatureViewTarget: {fileID: 0}
+  playerObservation: {fileID: 0}
+  observationRange: 10
+  gazeEnterAngle: 20
+  gazeExitAngle: 30
+  teleportSpeedGuard: 20
+  relativeMoveDeadZone: 0.15
+  visualOcclusionMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  viewportMargin: 0.03
+  visualAcquireMinDuration: 0.2
+  visualRearmMinHiddenDuration: 0.4
+--- !u!114 &8300087
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 22b0de73de07cbf4cbc9335ee7b6c9f1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.Perception.PlayerMovementSoundEmitter
+  playerMovement: {fileID: 0}
+  playerRoot: {fileID: 0}
+  movementThreshold: 0.15
+  crouchIntensity: 0.25
+  normalIntensity: 0.55
+  dashIntensity: 0.9
+  jumpIntensity: 1
+  movementSoundInterval: 0.35
+  teleportSpeedGuard: 20
+--- !u!114 &8300088
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.CreaturePerception
+  lookPivot: {fileID: 0}
+  player: {fileID: 0}
+  playerGazeTarget: {fileID: 0}
+  perceptionRange: 5
+  facingReference: {fileID: 0}
+  fovAngle: 90
+  objectOcclusionMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  turnSpeed: 240
+  headPivot: {fileID: 0}
+  headTurnSpeed: 140
+  maxLookDown: 55
+  maxLookUp: 80
+  pupil: {fileID: 0}
+  eyeReference: {fileID: 0}
+  pupilMaxOffset: 0.26
+  pupilGain: 0.6
+  playerGazeMotionThreshold: 1.5
+  playerGazeInterruptDuration: 0.5
+  playerGazeInterruptCooldown: 2.5
+  objectAttentionBudget: 7
+  objectAttentionCooldown: 2.5
 --- !u!1 &8300090
 GameObject:
   m_ObjectHideFlags: 0
