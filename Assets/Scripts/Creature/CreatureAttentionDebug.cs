@@ -66,6 +66,27 @@ namespace CreatureExperiment.Creature
             bool observeEngaged = _observe != null && _observe.IsEngaged;
             string probeState = _probe != null ? _probe.State.ToString() : "-";
             string throwProbeState = _throwProbe != null ? _throwProbe.State.ToString() : "-";
+            // Section 9 debug format: NONE while nothing is running, else which mode is (IMITATIVE /
+            // HIT_RESPONSE) - CurrentReaction is null exactly while Armed/Terminal.
+            string throwReaction = _throwProbe == null ? "-"
+                : _throwProbe.CurrentReaction == null ? "NONE"
+                : _throwProbe.CurrentReaction == CreatureThrowProbe.ThrowProbeMode.HitResponse ? "HIT_RESPONSE" : "IMITATIVE";
+            float throwReactionAge = _throwProbe != null ? _throwProbe.StateTimer : 0f;
+            string throwProbeUsed = _throwProbe != null
+                ? $"Imitative={_throwProbe.ImitativeOutcome} HitResponse={_throwProbe.HitResponseOutcome}"
+                : "-";
+            // 0.3: HitResponse's own repeatable-lifecycle status, independent of ProbeState/ProbeOutcome.
+            string hitResponseStatus = _throwProbe != null ? _throwProbe.CurrentHitResponseStatus.ToString() : "-";
+            float hitResponseCooldown = _throwProbe != null ? _throwProbe.HitResponseCooldownRemaining : 0f;
+            float hitResponsePendingRemaining = _throwProbe != null ? _throwProbe.HitResponsePendingLifetimeRemaining : 0f;
+            float lastHitAge = _throwProbe != null ? _throwProbe.LastHitAge : -1f;
+            bool pickupBusy = _throwProbe != null && _throwProbe.PickupBusy;
+            // 0.3.1: which point the last HitResponse throw actually aimed at.
+            string hitResponseAim = _throwProbe != null ? _throwProbe.LastHitResponseAimSource.ToString() : "-";
+            // 0.3.2: ballistic solve numbers for the last HitResponse throw.
+            float hitResponseDist = _throwProbe != null ? _throwProbe.LastHitResponseTargetDistance : 0f;
+            float hitResponseFlightTime = _throwProbe != null ? _throwProbe.LastHitResponseFlightTime : 0f;
+            float hitResponseLaunchSpeed = _throwProbe != null ? _throwProbe.LastHitResponseLaunchSpeed : 0f;
             // "Probe is driving root" == CreatureProbe.Delivering (the only phase that calls
             // SetProbeApproachTarget). ThrowProbe never drives root.
             bool probeDrivingRoot = _probe != null && _probe.State == CreatureProbe.ProbeState.Delivering;
@@ -87,7 +108,13 @@ namespace CreatureExperiment.Creature
                 $"Wander active     : {wanderActive}\n" +
                 $"PlayerObserve.IsEngaged : {observeEngaged}\n" +
                 $"Probe.State       : {probeState}   (drivingRoot={probeDrivingRoot})\n" +
-                $"ThrowProbe.State  : {throwProbeState}";
+                $"ThrowProbe.State  : {throwProbeState}\n" +
+                $"Throw Reaction    : {throwReaction}   (age={throwReactionAge:F2}s)\n" +
+                $"ThrowProbe.Outcomes: {throwProbeUsed}\n" +
+                $"HitResponse.Status : {hitResponseStatus}   cooldown={hitResponseCooldown:F1}s   pendingRemaining={hitResponsePendingRemaining:F1}s\n" +
+                $"HitResponse.LastHitAge : {(lastHitAge < 0f ? "-" : $"{lastHitAge:F1}s")}   PickupBusy={pickupBusy}\n" +
+                $"HitResponse.Aim    : {hitResponseAim}\n" +
+                $"HitResponse.Ballistic : dist={hitResponseDist:F1}m  flightTime={hitResponseFlightTime:F2}s  launchSpeed={hitResponseLaunchSpeed:F1}m/s";
 
             if (!logToConsole)
                 return;
@@ -122,7 +149,7 @@ namespace CreatureExperiment.Creature
             };
             style.normal.textColor = Color.white;
 
-            var rect = new Rect(hudOrigin.x, hudOrigin.y, 460f, 360f);
+            var rect = new Rect(hudOrigin.x, hudOrigin.y, 480f, 440f);
             GUI.color = new Color(0f, 0f, 0f, 0.6f);
             GUI.DrawTexture(rect, Texture2D.whiteTexture);
             GUI.color = Color.white;

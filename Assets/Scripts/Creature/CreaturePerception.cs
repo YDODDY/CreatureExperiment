@@ -233,6 +233,14 @@ namespace CreatureExperiment.Creature
         /// <summary>The player transform this component tracks, or null. Read-only seam for sibling components (e.g. movement).</summary>
         public Transform Player => player;
 
+        /// <summary>
+        /// Where gaze points when the player is the target: the player's own Camera if one was found in
+        /// its children, else the player root itself - resolved and cached once in Awake, never re-Found.
+        /// Read-only seam for <see cref="CreatureThrowProbe"/>'s HitResponse aim (0.3.1), reused as-is
+        /// from the gaze system rather than adding a second camera lookup.
+        /// </summary>
+        public Transform PlayerGazeTarget => playerGazeTarget;
+
         /// <summary>The transform the creature is gazing at this frame, or null when the range is empty. Read-only, for inspection.</summary>
         public Transform CurrentGazeTarget { get; private set; }
 

@@ -78,6 +78,9 @@ namespace CreatureExperiment.Creature
         /// <summary>True while this probe is mid-run (past Armed, not yet Terminal). The sibling throw probe checks this so only one probe engages at a time; a finished (Terminal) probe does NOT block the other.</summary>
         public bool IsEngaged => state != ProbeState.Armed && state != ProbeState.Terminal;
 
+        /// <summary>The object this probe currently holds/targets, or null when Armed/Terminal. Read-only seam for CreatureThrowProbe's HitResponse priority (0.3): lets it identify and safely redirect this probe's already-probe-owned carry into an aimed throw via CreaturePickup.RequestProbeReleaseAsThrow.</summary>
+        public Interactable ProbeObject => probeObject;
+
         private CreaturePattern _pattern;
         private CreaturePickup _pickup;
         private CreatureMovement _movement;

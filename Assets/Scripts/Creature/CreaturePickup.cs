@@ -182,18 +182,34 @@ namespace CreatureExperiment.Creature
 
         /// <summary>
         /// CreatureThrowProbe only: end the current probe carry now as an AIMED Throw along
-        /// <paramref name="flatAimDir"/> (typically the flat vector to the player), regardless of the
-        /// dev <c>releaseMode</c> toggle. Goes through the same Releasing -> ThrowTarget -> ReleaseReturning
+        /// <paramref name="aimDir"/> (typically the vector to the player), regardless of the dev
+        /// <c>releaseMode</c> toggle. Goes through the same Releasing -> ThrowTarget -> ReleaseReturning
         /// path a dev-toggle Throw uses; only the direction source changes. No-op unless a probe carry
         /// is in progress.
         /// </summary>
-        public void RequestProbeReleaseAsThrow(Vector3 flatAimDir)
+        /// <param name="aimDir">
+        /// By default (<paramref name="preserveVerticalAim"/> = false) a world DIRECTION toward the aim
+        /// target: BeginReleasing zeroes Y, normalizes, then blends in <see cref="throwUpwardFraction"/>
+        /// of straight-up for the usual toss arc and scales by <see cref="throwForce"/> - unchanged 0.2
+        /// behaviour, still what Imitative uses. When <paramref name="preserveVerticalAim"/> is true this
+        /// is instead the already-solved, already-speed-clamped final launch VELOCITY (0.3.2 ballistic
+        /// solve) - used verbatim, no rescale.
+        /// </param>
+        /// <param name="preserveVerticalAim">
+        /// 0.3.2 (HitResponse ballistic aim): when true, <paramref name="aimDir"/> is the caller's own
+        /// fully-solved launch velocity (magnitude included) - e.g. CreatureThrowProbe's flight-time
+        /// ballistic calculation toward the Player's camera/view point - used as-is instead of being
+        /// flattened, normalized, or replaced with the fixed toss-arc blend. This component still does
+        /// not perform any ballistic prediction itself; it only refrains from overriding one it is given.
+        /// </param>
+        public void RequestProbeReleaseAsThrow(Vector3 aimDir, bool preserveVerticalAim = false)
         {
             if (_phase != Phase.Carrying || !_probeCarry)
                 return;
 
             _probeThrowPending = true;
-            _probeThrowAimDir = flatAimDir; // BeginReleasing flattens + guards + normalizes, same as facing.forward
+            _probeThrowAimDir = aimDir; // BeginReleasing flattens+guards+normalizes+scales, unless preserveVerticalAim (then used verbatim)
+            _probeThrowPreserveVertical = preserveVerticalAim;
             _probeCarry = false;
             _carryTimer = _carryThreshold;
         }
@@ -217,7 +233,8 @@ namespace CreatureExperiment.Creature
         private float _carryThreshold;       // this carry's random carryDurationMin..Max
         private bool _probeCarry;            // true while THIS carry was started by a probe - suppresses the automatic carry-time release so the probe alone decides when to set down
         private bool _probeThrowPending;     // probe carry that must release as an aimed Throw regardless of releaseMode (set by CreatureThrowProbe)
-        private Vector3 _probeThrowAimDir;   // flat world direction for that throw - toward the player
+        private Vector3 _probeThrowAimDir;   // world direction for that throw - toward the player (flat) or camera/view point (0.3.1, see _probeThrowPreserveVertical)
+        private bool _probeThrowPreserveVertical; // 0.3.1: honour _probeThrowAimDir's own Y instead of flattening + adding throwUpwardFraction (HitResponse only)
         private Vector3 _armAimPoint;        // world point the arm reaches toward during Releasing (Place's ground spot, or a point out along the throw direction)
         private Vector3 _placePosition;      // Place only: world-space spot the object is actually set down at
         private Quaternion _placeRotation;   // Place only: upright, yawed with the creature's own facing
@@ -298,6 +315,7 @@ namespace CreatureExperiment.Creature
                             _aborted = false;
                             _probeCarry = false;
                             _probeThrowPending = false;
+                            _probeThrowPreserveVertical = false;
                             _target = null;
                             _dwellAccum = 0f;
                             _dwellTarget = null;
@@ -338,6 +356,7 @@ namespace CreatureExperiment.Creature
                         // Full reset - ready to bank dwell time toward a fresh pickup again.
                         _probeCarry = false;
                         _probeThrowPending = false;
+                        _probeThrowPreserveVertical = false;
                         _target = null;
                         _dwellTarget = null;
                         _dwellAccum = 0f;
@@ -477,20 +496,33 @@ namespace CreatureExperiment.Creature
 
             if (ReleasingAsThrow)
             {
-                // Dev-toggle Throw uses BodyVisual forward; a probe-forced throw uses the aim direction
-                // CreatureThrowProbe supplied (toward the player). Flatten + guard + normalize the same way.
-                Vector3 forward = _probeThrowPending ? _probeThrowAimDir : facing.forward;
-                forward.y = 0f;
-                if (forward.sqrMagnitude < 1e-6f)
-                    forward = Vector3.forward;
-                forward.Normalize();
+                if (_probeThrowPending && _probeThrowPreserveVertical && _probeThrowAimDir.sqrMagnitude > 1e-6f)
+                {
+                    // 0.3.2 (HitResponse ballistic aim): CreatureThrowProbe already solved the full
+                    // launch VELOCITY (not just a direction) via its own flight-time ballistic formula,
+                    // toward the Player's camera/view point, already speed-clamped. Use it verbatim -
+                    // no flatten, no throwForce rescale, no added toss-arc blend (that would corrupt the
+                    // vertical solution this velocity already encodes).
+                    _throwVelocity = _probeThrowAimDir;
+                    _armAimPoint = grabArm.position + _probeThrowAimDir.normalized * 0.6f;
+                }
+                else
+                {
+                    // Dev-toggle Throw uses BodyVisual forward; a probe-forced throw uses the aim direction
+                    // CreatureThrowProbe supplied (toward the player). Flatten + guard + normalize the same way.
+                    Vector3 forward = _probeThrowPending ? _probeThrowAimDir : facing.forward;
+                    forward.y = 0f;
+                    if (forward.sqrMagnitude < 1e-6f)
+                        forward = Vector3.forward;
+                    forward.Normalize();
 
-                // Forward blended with a slice of straight up, then normalized and scaled - the same
-                // "blend then normalize" idiom CreaturePhysicalProbe already uses for its poke
-                // direction, reused here for a natural arc instead of a flat throw.
-                Vector3 throwDir = (forward + Vector3.up * throwUpwardFraction).normalized;
-                _throwVelocity = throwDir * throwForce;
-                _armAimPoint = grabArm.position + throwDir * 0.6f; // just a gesture target, not the flight path
+                    // Forward blended with a slice of straight up, then normalized and scaled - the same
+                    // "blend then normalize" idiom CreaturePhysicalProbe already uses for its poke
+                    // direction, reused here for a natural arc instead of a flat throw.
+                    Vector3 throwDir = (forward + Vector3.up * throwUpwardFraction).normalized;
+                    _throwVelocity = throwDir * throwForce;
+                    _armAimPoint = grabArm.position + throwDir * 0.6f; // just a gesture target, not the flight path
+                }
             }
             else
             {
@@ -671,6 +703,7 @@ namespace CreatureExperiment.Creature
             _aborted = false;
             _probeCarry = false;
             _probeThrowPending = false;
+            _probeThrowPreserveVertical = false;
         }
 
         private float FlatDistance(Vector3 worldPos)

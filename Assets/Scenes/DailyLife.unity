@@ -139,7 +139,6 @@ GameObject:
   - component: {fileID: 8300083}
   - component: {fileID: 8300082}
   - component: {fileID: 8300081}
-  - component: {fileID: 8300088}
   - component: {fileID: 8300087}
   m_Layer: 0
   m_Name: Player
@@ -157,7 +156,7 @@ Transform:
   m_GameObject: {fileID: 1000000}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.1, z: -6}
+  m_LocalPosition: {x: 0, y: 0.159, z: -4.653}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -2014,12 +2013,32 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.CreatureThrowProbe
   probeDelayMin: 2
   probeDelayMax: 5
+  observation: {fileID: 0}
+  hitResponseDelayMin: 0.4
+  hitResponseDelayMax: 1.2
+  hitResponseCooldownMin: 6
+  hitResponseCooldownMax: 10
+  hitResponsePendingLifetime: 5
   throwProbeRange: 6.5
   fetchTimeout: 6
+  hitResponsePreferredHorizontalSpeed: 10
+  hitResponseMinFlightTime: 0.25
+  hitResponseMaxFlightTime: 1.2
+  hitResponseMaxLaunchSpeed: 18
+  imitativePlayerAimWeight: 0.35
+  imitativeScatterDegrees: 60
+  hitResponsePlayerAimWeight: 0.95
+  hitResponseScatterDegrees: 6
   state: 0
   outcome: 0
+  lastMode: 0
+  imitativeOutcome: 0
+  hitResponseOutcome: 0
   probeObject: {fileID: 0}
   stateTimer: 0
+  hitResponseCooldownRemaining: 0
+  hitResponsePendingAge: 0
+  lastHitTime: -1
 --- !u!114 &6000309
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6630,41 +6649,6 @@ MonoBehaviour:
   jumpIntensity: 1
   movementSoundInterval: 0.35
   teleportSpeedGuard: 20
---- !u!114 &8300088
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1000000}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::CreatureExperiment.Creature.CreaturePerception
-  lookPivot: {fileID: 0}
-  player: {fileID: 0}
-  playerGazeTarget: {fileID: 0}
-  perceptionRange: 5
-  facingReference: {fileID: 0}
-  fovAngle: 90
-  objectOcclusionMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  turnSpeed: 240
-  headPivot: {fileID: 0}
-  headTurnSpeed: 140
-  maxLookDown: 55
-  maxLookUp: 80
-  pupil: {fileID: 0}
-  eyeReference: {fileID: 0}
-  pupilMaxOffset: 0.26
-  pupilGain: 0.6
-  playerGazeMotionThreshold: 1.5
-  playerGazeInterruptDuration: 0.5
-  playerGazeInterruptCooldown: 2.5
-  objectAttentionBudget: 7
-  objectAttentionCooldown: 2.5
 --- !u!1 &8300090
 GameObject:
   m_ObjectHideFlags: 0
