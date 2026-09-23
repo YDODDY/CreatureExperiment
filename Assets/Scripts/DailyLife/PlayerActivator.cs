@@ -5,10 +5,11 @@ using CreatureExperiment.Player;
 namespace CreatureExperiment.DailyLife
 {
     /// <summary>
-    /// First-person "look at it and press Interact to use it" for non-pickup objects (card terminal,
-    /// bed). Reuses the shared <c>Interact</c> action. Defers whenever <see cref="PlayerInteractor"/>
-    /// is holding an item - then Interact means "place" - and since usables have no <c>Interactable</c>
-    /// the two never aim at the same object anyway.
+    /// First-person "look at it and press Interact to use it" for non-pickup objects (door, lid, card
+    /// terminal, bed). Owns what counts as a World Use target and its reach (<see cref="TryGetUsable"/>).
+    /// When a <see cref="PlayerInteractor"/> is present it owns the Interact key and routes a press here
+    /// (World Use first, held item or not), so this component does not read the key itself - one press
+    /// can never both Use and Place. Without an interactor it reads Interact on its own as before.
     /// </summary>
     public class PlayerActivator : MonoBehaviour
     {
@@ -18,7 +19,7 @@ namespace CreatureExperiment.DailyLife
         [Header("References")]
         [Tooltip("Ray origin - usually the Main Camera.")]
         [SerializeField] private Transform aimSource;
-        [Tooltip("If set, the Interact key is ignored here while this component is holding an item.")]
+        [Tooltip("If set, it owns the Interact key and asks this component for World Use targets.")]
         [SerializeField] private PlayerInteractor interactor;
 
         [Header("Reach")]
@@ -26,6 +27,9 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private LayerMask useMask = ~0;
 
         private InputAction _interact;
+
+        /// <summary>Max distance at which an <see cref="IUsable"/> can be used.</summary>
+        public float UseRange => useRange;
 
         private void Awake()
         {
@@ -43,21 +47,32 @@ namespace CreatureExperiment.DailyLife
         private void OnEnable() => _interact?.Enable();
         private void OnDisable() => _interact?.Disable();
 
+        /// <summary>The <see cref="IUsable"/> on the object <paramref name="hit"/> struck, if it is within reach.</summary>
+        public bool TryGetUsable(RaycastHit hit, out IUsable usable)
+        {
+            usable = null;
+            if (hit.collider == null || hit.distance > useRange)
+                return false;
+            if ((useMask.value & (1 << hit.collider.gameObject.layer)) == 0)
+                return false;
+            usable = hit.collider.GetComponentInParent<IUsable>();
+            return usable as Object != null;
+        }
+
         private void Update()
         {
+            // The interactor routes Interact (including World Use) - never handle the same press twice.
+            if (interactor != null)
+                return;
             if (_interact == null || aimSource == null)
                 return;
             if (!_interact.WasPressedThisFrame())
                 return;
-            if (interactor != null && interactor.IsHolding)
-                return;
 
             var ray = new Ray(aimSource.position, aimSource.forward);
-            if (Physics.Raycast(ray, out RaycastHit hit, useRange, useMask, QueryTriggerInteraction.Ignore))
-            {
-                var usable = hit.collider.GetComponentInParent<IUsable>();
-                usable?.Use();
-            }
+            if (Physics.Raycast(ray, out RaycastHit hit, useRange, useMask, QueryTriggerInteraction.Ignore)
+                && TryGetUsable(hit, out IUsable usable))
+                usable.Use();
         }
     }
 }

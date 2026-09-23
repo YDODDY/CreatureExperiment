@@ -16,6 +16,12 @@ namespace CreatureExperiment.Interaction
         [Tooltip("Name shown to the player when this object is focused. Falls back to the GameObject name.")]
         [SerializeField] private string displayName;
 
+        [Header("Identity")]
+        [Tooltip("Stable identifier for what kind of item this is (e.g. \"EmptyCan\"). Kept in records that outlive the object, like a GarbageDump's discard list. Falls back to the GameObject name.")]
+        [SerializeField] private string itemId;
+        [Tooltip("Can be thrown away in a GarbageDump. Off for items that must not disappear (work items).")]
+        [SerializeField] private bool discardable;
+
         [Header("Carry pose")]
         [Tooltip("Local position offset from the hold anchor while carried.")]
         [SerializeField] private Vector3 holdPositionOffset = Vector3.zero;
@@ -32,6 +38,12 @@ namespace CreatureExperiment.Interaction
         public Rigidbody Body => _body != null ? _body : (_body = GetComponent<Rigidbody>());
 
         public string DisplayName => string.IsNullOrEmpty(displayName) ? gameObject.name : displayName;
+
+        /// <summary>What kind of item this is - survives as plain data after the object itself is gone.</summary>
+        public string ItemId => string.IsNullOrEmpty(itemId) ? gameObject.name : itemId;
+
+        /// <summary>True if this item may be thrown away in a GarbageDump.</summary>
+        public bool IsDiscardable => discardable;
 
         // --- IFocusTarget: the Focus feedback (outline + name) treats an Interactable and a
         //     non-pickup FocusableProp the same way. SetFocused(bool) below is the third member.

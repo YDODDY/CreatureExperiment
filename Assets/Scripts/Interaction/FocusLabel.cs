@@ -36,11 +36,12 @@ namespace CreatureExperiment.Interaction
             Hide();
         }
 
-        public void Show(IFocusTarget focus)
+        /// <param name="nameOverride">Text to show instead of <see cref="IFocusTarget.FocusName"/> (e.g. a rejection prompt), or null.</param>
+        public void Show(IFocusTarget focus, string nameOverride = null)
         {
             _target = focus.FocusTransform;
             _targetRenderers = _target != null ? _target.GetComponentsInChildren<Renderer>() : null;
-            _name = focus.FocusName;
+            _name = nameOverride ?? focus.FocusName;
 
             if (text != null)
             {
