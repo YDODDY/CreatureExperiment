@@ -2,6 +2,14 @@ using UnityEngine;
 
 namespace CreatureExperiment.Interaction
 {
+    /// <summary>How an object was last thrown. Physical only - Strong is "thrown hard at an aimed spot", not an attack.</summary>
+    public enum ThrowMode
+    {
+        None,
+        Normal,
+        Strong
+    }
+
     /// <summary>
     /// Marker for objects that can be picked up and carried (by the player, or by a creature) and
     /// placed or thrown. It only carries the data the interaction system needs right now, plus a
@@ -77,6 +85,22 @@ namespace CreatureExperiment.Interaction
         public bool IsInFlight { get; private set; }
 
         /// <summary>
+        /// The most recent throw of this object (mode, who threw it, when), recorded by the thrower. Cleared
+        /// when someone grabs it, so it only ever describes the flight / landing since that throw - enough to
+        /// ask later "was this impact the result of a Player Strong Throw?". Not damage, not intent.
+        /// </summary>
+        public ThrowMode LastThrowMode { get; private set; }
+        public Object LastThrower { get; private set; }
+        public float LastThrowTime { get; private set; } = float.NegativeInfinity;
+
+        public void RecordThrow(ThrowMode mode, Object thrower)
+        {
+            LastThrowMode = mode;
+            LastThrower = thrower;
+            LastThrowTime = Time.time;
+        }
+
+        /// <summary>
         /// Claim this object for <paramref name="holder"/>. Returns false (and changes nothing) if a
         /// different holder already has it - this is what stops the player and the creature grabbing
         /// the same object, and what a future Take / Snatch action would deliberately bypass.
@@ -87,6 +111,8 @@ namespace CreatureExperiment.Interaction
             if (holder == null || (Holder != null && Holder != holder))
                 return false;
             Holder = holder;
+            LastThrowMode = ThrowMode.None;
+            LastThrower = null;
             return true;
         }
 

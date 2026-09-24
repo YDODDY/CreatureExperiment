@@ -110,6 +110,19 @@ namespace CreatureExperiment.Player
             DebugLocalRotationAfterWrite = transform.localRotation; // TEMPORARY DEBUG - read back immediately after the write above
         }
 
+        /// <summary>
+        /// Point the view at <paramref name="yaw"/> / <paramref name="pitch"/> (degrees; pitch positive =
+        /// looking down) - e.g. when the player sits down facing a table. Mouse look carries on from there.
+        /// </summary>
+        public void SetLookAngles(float yaw, float pitch)
+        {
+            _yaw = yaw;
+            _pitch = Mathf.Clamp(pitch, minPitch, maxPitch);
+            transform.localRotation = Quaternion.Euler(0f, _yaw, 0f);
+            if (cameraHolder != null)
+                cameraHolder.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+        }
+
         private static float NormalizePitch(float angle)
         {
             if (angle > 180f) angle -= 360f;

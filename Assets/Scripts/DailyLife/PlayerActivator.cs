@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using CreatureExperiment.Interaction;
 using CreatureExperiment.Player;
 
 namespace CreatureExperiment.DailyLife
@@ -56,6 +57,10 @@ namespace CreatureExperiment.DailyLife
             if ((useMask.value & (1 << hit.collider.gameObject.layer)) == 0)
                 return false;
             usable = hit.collider.GetComponentInParent<IUsable>();
+            // A loose object attached below a usable (a knife stuck in a door) is itself the target, not the door.
+            var item = hit.collider.GetComponentInParent<Interactable>();
+            if (item != null && usable is Component owner && item.transform != owner.transform && item.transform.IsChildOf(owner.transform))
+                usable = null;
             return usable as Object != null;
         }
 

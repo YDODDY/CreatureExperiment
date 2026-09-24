@@ -20,6 +20,9 @@ namespace CreatureExperiment.Player
     /// the held item to an <see cref="IHeldItemReceiver"/> &gt; Pickup (or Swap while holding) &gt;
     /// Place. <see cref="PlayerActivator"/> no longer reads Interact itself while this is present.
     ///
+    /// Strong Throw (Right Click, the "StrongThrow" action) is a second, separate release: a fast, flat
+    /// throw at whatever the centre ray points at (see <see cref="StrongThrow"/>). F stays the soft toss.
+    ///
     /// Throw is a purely physical action here. It carries no "attack" / "hostile" meaning;
     /// any interpretation of what a throw means belongs to a later, separate system.
     /// </summary>
@@ -58,8 +61,19 @@ namespace CreatureExperiment.Player
         [Tooltip("Small random spin added on throw. Set 0 for none.")]
         [SerializeField] private float throwSpin = 2f;
 
+        [Header("Strong throw")]
+        [Tooltip("Launch speed of a Strong Throw (Right Click).")]
+        [SerializeField] private float strongThrowSpeed = 16f;
+        [Tooltip("How far the centre ray looks for the aim point; with no hit, the point this far along the camera forward is used.")]
+        [SerializeField] private float strongAimRange = 30f;
+        [Tooltip("Gravity drop is compensated in the launch direction only up to this distance, so near and mid targets are hit without lobbing far ones.")]
+        [SerializeField] private float strongDropCompensationRange = 10f;
+        [Tooltip("Small random spin on a Strong Throw (lower than F, so the object flies cleanly). 0 = none.")]
+        [SerializeField] private float strongThrowSpin = 0.5f;
+
         private InputAction _interactAction;
         private InputAction _throwAction;
+        private InputAction _strongThrowAction;
 
         private IFocusTarget _focus;
         private string _focusLabelOverride;
@@ -73,6 +87,9 @@ namespace CreatureExperiment.Player
         private Interactable _aimPickup;
         private bool _aimRejected;          // aimed at a receiver that refuses the held item - the press does nothing
         private string _aimLabelOverride;   // label to show instead of the focus's own FocusName (a rejection prompt)
+
+        // World Use that answers Interact when the aim resolves to no action at all (see SetFallbackUse).
+        private IUsable _fallbackUse;
 
         // Per-frame placement solution while carrying.
         private bool _placeValid;
@@ -90,6 +107,7 @@ namespace CreatureExperiment.Player
             var playerMap = inputActions.FindActionMap("Player", throwIfNotFound: true);
             _interactAction = playerMap.FindAction("Interact", throwIfNotFound: true);
             _throwAction = playerMap.FindAction("Throw", throwIfNotFound: true);
+            _strongThrowAction = playerMap.FindAction("StrongThrow", throwIfNotFound: false);
 
             if (aimSource == null && Camera.main != null)
                 aimSource = Camera.main.transform;
@@ -101,18 +119,34 @@ namespace CreatureExperiment.Player
         {
             _interactAction?.Enable();
             _throwAction?.Enable();
+            _strongThrowAction?.Enable();
         }
 
         private void OnDisable()
         {
             _interactAction?.Disable();
             _throwAction?.Disable();
+            _strongThrowAction?.Disable();
             SetFocus(null);
         }
 
+        /// <summary>
+        /// Register a World Use that answers Interact whenever the aim resolves to no action - e.g. the
+        /// chair the player is sitting on ("일어서기"), which the player usually isn't looking at. Anything
+        /// actually aimed at still wins; the fallback only comes before Place. Its focus (label) is shown
+        /// while it is the answer. Pass null to clear.
+        /// </summary>
+        public void SetFallbackUse(IUsable usable) => _fallbackUse = usable;
+
         private void Update()
         {
-            SetFocus(ResolveAim(), _aimLabelOverride);
+            IFocusTarget aimFocus = ResolveAim();
+            if (_fallbackUse as Object != null && _aimUsable == null && _aimReceiver == null && !_aimRejected && _aimPickup == null)
+            {
+                _aimUsable = _fallbackUse;
+                aimFocus = _fallbackUse as IFocusTarget ?? aimFocus;
+            }
+            SetFocus(aimFocus, _aimLabelOverride);
 
             if (_held != null)
             {
@@ -120,6 +154,11 @@ namespace CreatureExperiment.Player
                 if (_throwAction.WasPressedThisFrame())
                 {
                     Throw();
+                    return;
+                }
+                if (_strongThrowAction != null && _strongThrowAction.WasPressedThisFrame())
+                {
+                    StrongThrow();
                     return;
                 }
             }
@@ -398,6 +437,48 @@ namespace CreatureExperiment.Player
             if (throwSpin > 0f)
                 body.angularVelocity = Random.insideUnitSphere * throwSpin;
 
+            obj.RecordThrow(ThrowMode.Normal, this);
+            PhysicalEvents.Raise(PhysicalEventKind.Throw, obj, this);
+        }
+
+        /// <summary>
+        /// Throw the held item hard at the aim point: the centre ray's hit within
+        /// <see cref="strongAimRange"/>, else the point that far along the camera forward. The launch goes
+        /// from where the item actually is (the hand, not the camera) toward that point, so near targets
+        /// are not missed by the hand offset, with the gravity drop over the (capped) distance folded into
+        /// the launch angle. Set once at release - no homing, no correction in flight; plain Rigidbody
+        /// physics from then on. Same Throw event as F; the Strong mode is recorded on the item.
+        /// </summary>
+        private void StrongThrow()
+        {
+            Interactable obj = _held;
+            var ray = new Ray(aimSource.position, aimSource.forward);
+            Vector3 target = Physics.Raycast(ray, out RaycastHit hit, strongAimRange, ~0, QueryTriggerInteraction.Ignore)
+                ? hit.point
+                : ray.GetPoint(strongAimRange);
+
+            _held = null;
+            obj.Release(this);
+            obj.SetInFlight(true);
+
+            obj.transform.SetParent(null, worldPositionStays: true);
+            EnableColliders(_heldColliders);
+            _heldColliders = null;
+
+            var body = obj.Body;
+            Vector3 from = obj.transform.TransformPoint(body.centerOfMass); // transform, not the body pose: it was just unparented
+            Vector3 toTarget = target - from;
+            float compensated = Mathf.Min(toTarget.magnitude, strongDropCompensationRange);
+            float flightTime = compensated / strongThrowSpeed;
+            Vector3 aimAt = target + Vector3.up * (0.5f * -Physics.gravity.y * flightTime * flightTime);
+            Vector3 dir = (aimAt - from).sqrMagnitude > 0.0001f ? (aimAt - from).normalized : aimSource.forward;
+
+            body.isKinematic = false;
+            body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative; // fast and small: don't pass through thin walls
+            body.linearVelocity = dir * strongThrowSpeed;
+            body.angularVelocity = strongThrowSpin > 0f ? Random.insideUnitSphere * strongThrowSpin : Vector3.zero;
+
+            obj.RecordThrow(ThrowMode.Strong, this);
             PhysicalEvents.Raise(PhysicalEventKind.Throw, obj, this);
         }
 
