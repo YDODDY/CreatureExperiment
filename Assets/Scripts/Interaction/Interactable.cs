@@ -39,6 +39,9 @@ namespace CreatureExperiment.Interaction
 
         public string DisplayName => string.IsNullOrEmpty(displayName) ? gameObject.name : displayName;
 
+        /// <summary>Change the focus name at runtime (e.g. a work item that turns into "파손품").</summary>
+        public void SetDisplayName(string value) => displayName = value;
+
         /// <summary>What kind of item this is - survives as plain data after the object itself is gone.</summary>
         public string ItemId => string.IsNullOrEmpty(itemId) ? gameObject.name : itemId;
 

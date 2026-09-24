@@ -3,9 +3,9 @@ using UnityEngine;
 namespace CreatureExperiment.DailyLife
 {
     /// <summary>
-    /// The wall card reader by the workplace entrance. One terminal handles both clock-in and
-    /// clock-out; it just forwards the interaction and lets <see cref="DailyLifeDirector"/> decide
-    /// which (if either) applies right now. Not a pickup - no <c>Interactable</c>.
+    /// LEGACY (TestWorld_Old, now inactive). The old single wall card reader; replaced by the
+    /// Workplace's <see cref="WorkplaceCardReader"/>s + <see cref="WorkplaceAttendance"/>.
+    /// <see cref="DailyLifeDirector.UseTerminal"/> now ignores it. Not a pickup - no <c>Interactable</c>.
     /// </summary>
     public class CardTerminal : MonoBehaviour, IUsable
     {

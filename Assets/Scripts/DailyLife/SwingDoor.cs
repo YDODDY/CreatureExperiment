@@ -11,6 +11,10 @@ namespace CreatureExperiment.DailyLife
     /// and comes back once the door has settled and the player isn't standing inside the leaf.
     /// Also an <see cref="IFocusTarget"/>: outline + "open door" / "close door" label while aimed at.
     /// Not a pickup - no <c>Interactable</c>.
+    ///
+    /// Optional lock: while <see cref="IsLocked"/> and closed, Use() does nothing and the label shows
+    /// <see cref="lockedPrompt"/>. An already-open door can always be closed. Who locks / unlocks is
+    /// decided elsewhere (e.g. <see cref="WorkplaceAttendance"/>); the door only obeys.
     /// </summary>
     public class SwingDoor : MonoBehaviour, IUsable, IFocusTarget
     {
@@ -29,6 +33,11 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private float openAngle = 90f;
         [SerializeField] private float swingDuration = 0.8f;
 
+        [Header("Lock")]
+        [Tooltip("While locked and closed, Use() does nothing. Off by default - ordinary doors never lock.")]
+        [SerializeField] private bool locked;
+        [SerializeField] private string lockedPrompt = "잠겨 있습니다";
+
         private bool _isOpen;
         private bool _isMoving;
         private bool _colliderPending;
@@ -38,11 +47,12 @@ namespace CreatureExperiment.DailyLife
 
         public bool IsOpen => _isOpen;
         public bool IsMoving => _isMoving;
+        public bool IsLocked => locked;
 
         // --- IFocusTarget: same outline + label feedback as FocusableProp, but the label names the
         // action the next Use() will do. The collider is off mid-swing, so focus drops and is picked
         // up again (with the new label) once the door settles.
-        public string FocusName => _isOpen ? closePrompt : openPrompt;
+        public string FocusName => locked && !_isOpen ? lockedPrompt : (_isOpen ? closePrompt : openPrompt);
         public Transform FocusTransform => leafCollider != null ? leafCollider.transform : transform;
 
         public void SetFocused(bool focused)
@@ -59,9 +69,27 @@ namespace CreatureExperiment.DailyLife
                 outlineRenderer.enabled = false;
         }
 
+        public void SetLocked(bool value) => locked = value;
+
+        /// <summary>
+        /// Jump straight to closed, cancelling any swing. For resets while nobody is near the door (e.g. a
+        /// new day). The label goes back to the open prompt; a leaf collider switched off by an interrupted
+        /// swing comes back through the usual "no character inside the leaf" check in Update.
+        /// </summary>
+        public void SnapClosed()
+        {
+            _isMoving = false;
+            _isOpen = false;
+            SetAngle(closedAngle);
+            if (leafCollider != null && !leafCollider.enabled)
+                _colliderPending = true;
+        }
+
         public void Use()
         {
             if (_isMoving || _colliderPending)
+                return;
+            if (locked && !_isOpen)
                 return;
 
             _fromAngle = _isOpen ? openAngle : closedAngle;

@@ -82,6 +82,9 @@ namespace CreatureExperiment.Player
         /// <summary>True while the player is carrying an item. Holding does not block World Use - it only changes what an Interact press with no target does (Place instead of nothing).</summary>
         public bool IsHolding => _held != null;
 
+        /// <summary>The item currently carried, or null. Read-only - for HUDs that describe the held item.</summary>
+        public Interactable HeldItem => _held;
+
         private void Awake()
         {
             var playerMap = inputActions.FindActionMap("Player", throwIfNotFound: true);
@@ -176,21 +179,32 @@ namespace CreatureExperiment.Player
                 return focus;
             }
 
-            if (hit.distance > pickupRange || !InMask(pickupMask, col.gameObject.layer))
-                return null;
+            bool inMask = InMask(pickupMask, col.gameObject.layer);
 
+            // An optional receiver (IOptionalHeldItemReceiver) that does not handle the held item is just
+            // a plain object here - pickup / swap / place go on as usual. Optional receivers may also
+            // reach a little further (e.g. a ceiling for a sticker), never beyond the ray.
             var receiver = col.GetComponentInParent<IHeldItemReceiver>();
-            if (_held != null && receiver as Object != null)
+            if (receiver is IOptionalHeldItemReceiver optional && !optional.AppliesTo(_held))
+                receiver = null;
+            if (_held != null && receiver as Object != null && inMask)
             {
-                if (receiver.CanReceive(_held))
+                float reach = receiver is IOptionalHeldItemReceiver opt ? Mathf.Max(pickupRange, opt.MaxReach) : pickupRange;
+                if (hit.distance <= reach)
                 {
-                    _aimReceiver = receiver;
-                    return receiver;
+                    if (receiver.CanReceive(_held))
+                    {
+                        _aimReceiver = receiver;
+                        return receiver;
+                    }
+                    _aimRejected = true;
+                    _aimLabelOverride = receiver.GetRejectPrompt(_held);
+                    return _aimLabelOverride != null ? receiver : null;
                 }
-                _aimRejected = true;
-                _aimLabelOverride = receiver.GetRejectPrompt(_held);
-                return _aimLabelOverride != null ? receiver : null;
             }
+
+            if (hit.distance > pickupRange || !inMask)
+                return null;
 
             // An object the creature is already holding is not a focus / pickup candidate.
             var item = col.GetComponentInParent<Interactable>();
@@ -284,7 +298,11 @@ namespace CreatureExperiment.Player
                 return;
 
             // A receiver (GarbageDump) is not a shelf: an item goes into it via HandOver or not at all.
-            if (hit.collider.GetComponentInParent<IHeldItemReceiver>() as Object != null)
+            // An optional receiver that does not handle the held item (a floor that only takes stickers)
+            // is an ordinary surface.
+            var surfaceReceiver = hit.collider.GetComponentInParent<IHeldItemReceiver>();
+            if (surfaceReceiver as Object != null
+                && !(surfaceReceiver is IOptionalHeldItemReceiver optional && !optional.AppliesTo(_held)))
                 return;
 
             _placePosition = hit.point + Vector3.up * _heldPivotToBottom;

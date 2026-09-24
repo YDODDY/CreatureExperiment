@@ -4,33 +4,30 @@ namespace CreatureExperiment.DailyLife
 {
     public enum DayPhase
     {
-        CommuteToWork, // "출근하기"      - walk Home -> Workplace
-        Working,       // "물건 정리하기 X/N" - clocked in at the terminal, sorting
-        CommuteHome,   // "퇴근하기"      - clocked out, walk Workplace -> Home
-        Sleep          // "잠자기"        - back inside the house, may use the Bed
+        CommuteToWork, // "출근하기"   - walk Home -> Workplace
+        Working,       // clocked in at the Workplace; the objective line is the shift's own
+        CommuteHome,   // "퇴근하기"   - clocked out, walk Workplace -> Home
+        Sleep          // "잠자기"     - back inside the house, may use the Bed
     }
 
     /// <summary>
-    /// Daily-Life 0.1 - the one and only orchestrator of the small day loop. It holds just the state
-    /// the loop needs (day number, phase) and nothing else: no money, hunger, stamina, time-of-day,
-    /// schedule, or generic task framework.
+    /// The orchestrator of the small day loop. It holds just the state the loop needs (day number,
+    /// phase) and nothing else: no money, hunger, stamina, time-of-day or generic task framework.
     ///
-    /// Sorting progress is recomputed from the WORLD every frame - for each <see cref="SortableItem"/>
-    /// that is not currently held, is its pivot inside the matching <see cref="SortingArea"/>? So the
-    /// count rises and falls live as things move; it is never "permanently done". Reaching N/N does
-    /// NOT auto-complete work: the player must, while it currently reads N/N, use the card terminal
-    /// (<see cref="UseTerminal"/>) to clock out. Once that succeeds the day's work is latched and
-    /// later item moves no longer un-complete it.
+    /// The Workplace owns the work itself: <see cref="WorkplaceAttendance"/> reports clock-in / clock-out
+    /// (<see cref="OnWorkClockedIn"/> / <see cref="OnWorkClockedOut"/>), and while Working the objective
+    /// line shows <see cref="WorkShiftController.ObjectiveText"/>. Clock-out is accepted any time; the
+    /// shift scores whatever was left undone.
     ///
-    /// Interactions call in: <see cref="UseTerminal"/> (CardTerminal), <see cref="OnEnteredHome"/>
-    /// (HomeArrival trigger), <see cref="UseBed"/> (Bed).
+    /// Interactions call in: WorkplaceAttendance (clock in/out), <see cref="OnEnteredHome"/> (HomeArrival
+    /// trigger), <see cref="UseBed"/> (Bed). A day rollover raises <see cref="DayStarted"/>.
     /// </summary>
     public class DailyLifeDirector : MonoBehaviour
     {
         [Header("References")]
         [SerializeField] private ObjectiveHUD objectiveHud;
-        [SerializeField] private SortingArea cubeArea;
-        [SerializeField] private SortingArea sphereArea;
+        [Tooltip("The day's work - only read for the objective line while Working.")]
+        [SerializeField] private WorkShiftController workShift;
         [Tooltip("Player root - moved back to homeSpawn on day rollover.")]
         [SerializeField] private Transform player;
         [Tooltip("Where the player is placed at the start of each day. Position/rotation only - not used for any phase test.")]
@@ -43,100 +40,71 @@ namespace CreatureExperiment.DailyLife
         [Header("State (read-only, for debugging)")]
         [SerializeField] private int day = 1;
         [SerializeField] private DayPhase phase = DayPhase.CommuteToWork;
-        [SerializeField] private int sortedCount;
-        [SerializeField] private int totalCount;
-        [SerializeField] private bool workDoneToday;
 
-        private SortableItem[] _items;
         private string _lastObjective;
 
         public int Day => day;
         public DayPhase Phase => phase;
-        public int SortedCount => sortedCount;
-        public int TotalCount => totalCount;
+
+        /// <summary>Raised after the bed rolls the day over, with the new day number. Listeners reset their own per-day state.</summary>
+        public event System.Action<int> DayStarted;
 
         private void Awake()
         {
-            _items = FindObjectsByType<SortableItem>(FindObjectsSortMode.None);
-            totalCount = _items.Length;
             day = Mathf.Max(1, startDay);
         }
 
         private void Start()
         {
             phase = DayPhase.CommuteToWork;
-            workDoneToday = false;
-            RecomputeSorted();
             RefreshObjective(force: true);
         }
 
         private void Update()
         {
-            RecomputeSorted();
             RefreshObjective(force: false);
-        }
-
-        // --- world query ---------------------------------------------------
-
-        private void RecomputeSorted()
-        {
-            int n = 0;
-            for (int i = 0; i < _items.Length; i++)
-            {
-                SortableItem it = _items[i];
-                if (it == null || it.IsHeld)
-                    continue;
-                SortKind? here = AreaKindAt(it.transform.position);
-                if (here.HasValue && here.Value == it.Kind)
-                    n++;
-            }
-            sortedCount = n;
-        }
-
-        private SortKind? AreaKindAt(Vector3 worldPos)
-        {
-            if (cubeArea != null && cubeArea.Contains(worldPos)) return SortKind.Cube;
-            if (sphereArea != null && sphereArea.Contains(worldPos)) return SortKind.Sphere;
-            return null;
         }
 
         // --- interactions ------------------------------------------------
 
-        /// <summary>CardTerminal: clock in from the commute, or - only while the count currently reads N/N - clock out.</summary>
-        public void UseTerminal()
+        /// <summary>WorkplaceAttendance: clock-in succeeded.</summary>
+        public void OnWorkClockedIn()
         {
-            switch (phase)
-            {
-                case DayPhase.CommuteToWork:
-                    SetPhase(DayPhase.Working);
-                    Debug.Log($"[DailyLife] Day {day}: clocked IN.");
-                    break;
-
-                case DayPhase.Working:
-                    RecomputeSorted();
-                    if (totalCount > 0 && sortedCount >= totalCount)
-                    {
-                        workDoneToday = true;
-                        SetPhase(DayPhase.CommuteHome);
-                        Debug.Log($"[DailyLife] Day {day}: clocked OUT - work complete.");
-                    }
-                    else
-                    {
-                        Debug.Log($"[DailyLife] Day {day}: clock-out denied - sorting {sortedCount}/{totalCount}.");
-                    }
-                    break;
-
-                // CommuteHome / Sleep: the terminal does nothing.
-                default:
-                    break;
-            }
+            if (phase != DayPhase.CommuteToWork)
+                return;
+            SetPhase(DayPhase.Working);
+            Debug.Log($"[DailyLife] Day {day}: clocked IN.");
         }
 
-        /// <summary>HomeArrival trigger: the player walked back into the house. Only means something after clocking out.</summary>
+        /// <summary>WorkplaceAttendance: clock-out succeeded.</summary>
+        public void OnWorkClockedOut()
+        {
+            if (phase != DayPhase.Working)
+                return;
+            SetPhase(DayPhase.CommuteHome);
+            Debug.Log($"[DailyLife] Day {day}: clocked OUT.");
+        }
+
+        /// <summary>
+        /// Legacy TestWorld_Old CardTerminal entry point. The Workplace readers replaced it; kept only so
+        /// the old component still compiles. Does nothing.
+        /// </summary>
+        public void UseTerminal()
+        {
+            Debug.Log("[DailyLife] Legacy CardTerminal ignored - use the Workplace card readers.");
+        }
+
+        /// <summary>
+        /// HomeArrival trigger: the player walked back into the house. After a clock-out this is the normal
+        /// way home. Leaving the Workplace without clocking out is not blocked either - it also lets the
+        /// player sleep, and <see cref="WorkplaceAttendance.PreviousDayMissedClockOut"/> records it.
+        /// </summary>
         public void OnEnteredHome()
         {
-            if (phase == DayPhase.CommuteHome)
+            if (phase == DayPhase.CommuteHome || phase == DayPhase.Working)
             {
+                if (phase == DayPhase.Working)
+                    Debug.Log($"[DailyLife] Day {day}: home without clocking out.");
                 SetPhase(DayPhase.Sleep);
                 Debug.Log($"[DailyLife] Day {day}: home. Use the bed to sleep.");
             }
@@ -148,10 +116,6 @@ namespace CreatureExperiment.DailyLife
             if (phase != DayPhase.Sleep)
                 return;
 
-            for (int i = 0; i < _items.Length; i++)
-                if (_items[i] != null)
-                    _items[i].ResetToSpawn();
-
             if (player != null && homeSpawn != null)
             {
                 var cc = player.GetComponent<CharacterController>();
@@ -161,11 +125,9 @@ namespace CreatureExperiment.DailyLife
             }
 
             day++;
-            workDoneToday = false;
             SetPhase(DayPhase.CommuteToWork);
-            RecomputeSorted();
-            RefreshObjective(force: true);
             Debug.Log($"[DailyLife] Slept. Day {day} begins.");
+            DayStarted?.Invoke(day);
         }
 
         // --- objective text --------------------------------------------
@@ -182,7 +144,7 @@ namespace CreatureExperiment.DailyLife
             switch (phase)
             {
                 case DayPhase.CommuteToWork: s = "출근하기"; break;
-                case DayPhase.Working:       s = $"물건 정리하기 {sortedCount}/{totalCount}"; break;
+                case DayPhase.Working:       s = workShift != null ? workShift.ObjectiveText : "작업하기"; break;
                 case DayPhase.CommuteHome:   s = "퇴근하기"; break;
                 case DayPhase.Sleep:         s = "잠자기"; break;
                 default:                     s = ""; break;
