@@ -28,12 +28,14 @@ namespace CreatureExperiment.DailyLife
     /// discardable <see cref="Interactable"/> can aim at the body and press Interact ("버리기"):
     /// <c>PlayerInteractor</c> releases its hold and hands the item here, and this dump adds a
     /// <see cref="DiscardedItemRecord"/> to its own list and destroys the object. Each dump keeps its own
-    /// list for the session (runtime only). Taking items back out is not built yet.
+    /// list for the session (runtime only). Taking items back out is not built yet. With no cover (the
+    /// Home kitchen TrashBin) it is always open. What may go in is the item's own
+    /// <see cref="Interactable.IsDiscardable"/> - the policy hook for items that must never be thrown away.
     /// </summary>
     public class GarbageDump : MonoBehaviour, IHeldItemReceiver
     {
         [Header("References")]
-        [Tooltip("This dump's lid. The body only accepts items while it is fully open.")]
+        [Tooltip("This dump's lid. The body only accepts items while it is fully open. None = no lid, always open.")]
         [SerializeField] private GarbageDumpCover cover;
         [Tooltip("Renderer of the body's outline child - enabled only while focused.")]
         [SerializeField] private Renderer outlineRenderer;
@@ -50,7 +52,7 @@ namespace CreatureExperiment.DailyLife
         /// <summary>Everything thrown into this dump so far, oldest first.</summary>
         public IReadOnlyList<DiscardedItemRecord> Discarded => discarded;
         public int DiscardedCount => discarded.Count;
-        public bool IsOpen => cover != null && cover.IsOpen;
+        public bool IsOpen => cover == null || cover.IsOpen; // no lid (a kitchen bin): always open
 
         // --- IFocusTarget
         public string FocusName => discardPrompt;

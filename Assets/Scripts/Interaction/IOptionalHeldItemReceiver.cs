@@ -14,5 +14,12 @@ namespace CreatureExperiment.Interaction
 
         /// <summary>How far away it can be handed to, in metres (at least the normal pickup reach is always used).</summary>
         float MaxReach { get; }
+
+        /// <summary>
+        /// A dedicated receiver (the frying pan's food spot, a meal plate): while the player holds ANY item it keeps
+        /// the aim like a plain receiver - an item it does not handle is refused (E does nothing, no swap) and it is
+        /// never a surface to place on. Empty hands: still an ordinary pickup. Default false (packing box, walls).
+        /// </summary>
+        bool IsDedicated => false;
     }
 }

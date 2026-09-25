@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using CreatureExperiment.Interaction;
@@ -71,6 +72,12 @@ namespace CreatureExperiment.Player
         [Tooltip("Small random spin on a Strong Throw (lower than F, so the object flies cleanly). 0 = none.")]
         [SerializeField] private float strongThrowSpin = 0.5f;
 
+        [Header("Safe release")]
+        [Tooltip("How long a thrown item ignores the player's own capsule, so a release pulled in close to the body can't bounce off it.")]
+        [SerializeField] private float throwIgnoreBodyTime = 0.3f;
+        [Tooltip("How far a Place may be slid back toward the player when the item would stick into a wall / door at the aimed spot (m).")]
+        [SerializeField] private float placeNudgeMax = 0.4f;
+
         private InputAction _interactAction;
         private InputAction _throwAction;
         private InputAction _strongThrowAction;
@@ -80,6 +87,12 @@ namespace CreatureExperiment.Player
         private Interactable _held;
         private Collider[] _heldColliders;
         private float _heldPivotToBottom;
+        // Shape of the held item, measured at pickup while its colliders were still on (they are off in the hand):
+        // collider-bounds centre in the item's local space, and the world half-extents.
+        private Vector3 _heldLocalCenter;
+        private Vector3 _heldExtents;
+        private CharacterController _ownBody;
+        private readonly Collider[] _overlapBuffer = new Collider[16];
 
         // Per-frame aim resolution - what one Interact press would do right now (at most one is set).
         private IUsable _aimUsable;
@@ -113,6 +126,7 @@ namespace CreatureExperiment.Player
                 aimSource = Camera.main.transform;
             if (activator == null)
                 activator = GetComponent<PlayerActivator>();
+            _ownBody = GetComponent<CharacterController>();
         }
 
         private void OnEnable()
@@ -138,8 +152,28 @@ namespace CreatureExperiment.Player
         /// </summary>
         public void SetFallbackUse(IUsable usable) => _fallbackUse = usable;
 
+        /// <summary>
+        /// Put <paramref name="item"/> - something that was just taken out of a container (an egg from its
+        /// carton) - straight into the empty hand, exactly like a pickup. False if the hand is already full
+        /// or the item can't be claimed.
+        /// </summary>
+        public bool TryHoldNew(Interactable item)
+        {
+            if (_held != null || item == null)
+                return false;
+            return Pickup(item);
+        }
+
         private void Update()
         {
+            // A held tool in the middle of its Left Click action (tape being drawn): no E / F / Right Click
+            // until it ends, so the roll can't be dropped, swapped or thrown mid-strip.
+            if (_held != null && _held.TryGetComponent(out IHeldPrimaryAction primary) && primary.PrimaryActive)
+            {
+                SetFocus(null);
+                return;
+            }
+
             IFocusTarget aimFocus = ResolveAim();
             if (_fallbackUse as Object != null && _aimUsable == null && _aimReceiver == null && !_aimRejected && _aimPickup == null)
             {
@@ -223,8 +257,10 @@ namespace CreatureExperiment.Player
             // An optional receiver (IOptionalHeldItemReceiver) that does not handle the held item is just
             // a plain object here - pickup / swap / place go on as usual. Optional receivers may also
             // reach a little further (e.g. a ceiling for a sticker), never beyond the ray.
+            // A dedicated optional receiver (pan, meal plate) keeps the aim for every held item: one it does not
+            // handle is refused below - never swapped with, never placed on.
             var receiver = col.GetComponentInParent<IHeldItemReceiver>();
-            if (receiver is IOptionalHeldItemReceiver optional && !optional.AppliesTo(_held))
+            if (receiver is IOptionalHeldItemReceiver optional && !optional.AppliesTo(_held) && !(optional.IsDedicated && _held != null))
                 receiver = null;
             if (_held != null && receiver as Object != null && inMask)
             {
@@ -305,8 +341,18 @@ namespace CreatureExperiment.Player
             _heldColliders = _held.GetComponentsInChildren<Collider>();
 
             // Cache how far the pivot sits above the object's lowest point, so we can
-            // rest it flush on the ground later. Colliders are still enabled here.
+            // rest it flush on the ground later, and its size for a safe release. Colliders are still enabled here.
             _heldPivotToBottom = ComputePivotToBottom(_held.transform, _heldColliders);
+            if (TryGetBounds(_heldColliders, out Bounds heldBounds))
+            {
+                _heldLocalCenter = _held.transform.InverseTransformPoint(heldBounds.center);
+                _heldExtents = heldBounds.extents;
+            }
+            else
+            {
+                _heldLocalCenter = Vector3.zero;
+                _heldExtents = Vector3.one * 0.05f;
+            }
 
             foreach (var col in _heldColliders)
                 if (col != null) col.enabled = false;
@@ -316,9 +362,13 @@ namespace CreatureExperiment.Player
             body.angularVelocity = Vector3.zero;
             body.isKinematic = true;
 
+            // Keep the item's own world size in the hand (it may come off a scaled plate / pan).
+            Vector3 worldScale = _held.transform.lossyScale;
             _held.transform.SetParent(holdAnchor, worldPositionStays: false);
             _held.transform.localPosition = _held.HoldPositionOffset;
             _held.transform.localRotation = _held.HoldRotationOffset;
+            Vector3 anchorScale = holdAnchor.lossyScale;
+            _held.transform.localScale = new Vector3(worldScale.x / anchorScale.x, worldScale.y / anchorScale.y, worldScale.z / anchorScale.z);
             return true;
         }
 
@@ -341,12 +391,134 @@ namespace CreatureExperiment.Player
             // is an ordinary surface.
             var surfaceReceiver = hit.collider.GetComponentInParent<IHeldItemReceiver>();
             if (surfaceReceiver as Object != null
-                && !(surfaceReceiver is IOptionalHeldItemReceiver optional && !optional.AppliesTo(_held)))
+                && !(surfaceReceiver is IOptionalHeldItemReceiver optional && !optional.AppliesTo(_held) && !optional.IsDedicated))
                 return;
 
             _placePosition = hit.point + Vector3.up * _heldPivotToBottom;
             _placeRotation = Quaternion.Euler(0f, aimSource.eulerAngles.y, 0f);
-            _placeValid = true;
+            _placeValid = PlaceSpotClear(_placePosition, hit.collider) || NudgePlaceTowardPlayer(hit);
+        }
+
+        /// <summary>
+        /// The item set down at the aimed spot must not stick into a wall / door / fridge beside it (the solver
+        /// would shove it out - or through). Slide the spot back toward the player along the same kind of flat
+        /// surface, a few cm at a time, up to <see cref="placeNudgeMax"/>. No clear spot = no Place.
+        /// </summary>
+        private bool NudgePlaceTowardPlayer(RaycastHit surface)
+        {
+            Vector3 toPlayer = transform.position - surface.point;
+            toPlayer.y = 0f;
+            if (toPlayer.sqrMagnitude < 0.0001f)
+                return false;
+            toPlayer.Normalize();
+
+            const float step = 0.03f;
+            for (float d = step; d <= placeNudgeMax + 0.0001f; d += step)
+            {
+                // Re-find the surface under the slid spot (still flat, still not a receiver).
+                Vector3 above = surface.point + toPlayer * d + Vector3.up * 0.3f;
+                if (!Physics.Raycast(above, Vector3.down, out RaycastHit under, 0.6f, placeMask, QueryTriggerInteraction.Ignore))
+                    continue;
+                if (Vector3.Angle(under.normal, Vector3.up) > placeMaxSlope)
+                    continue;
+                if (under.collider.GetComponentInParent<IHeldItemReceiver>() as Object != null)
+                    continue;
+                Vector3 candidate = under.point + Vector3.up * _heldPivotToBottom;
+                if (PlaceSpotClear(candidate, under.collider))
+                {
+                    _placePosition = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Nothing solid in the item's footprint at <paramref name="pivotPosition"/>: a conservative upright box -
+        /// the item's height, and its widest horizontal half-extent on both X and Z (a place turns it to the camera
+        /// yaw). The bottom is lifted 1 cm so the surface it rests on doesn't count; the player's capsule doesn't either.
+        /// </summary>
+        private bool PlaceSpotClear(Vector3 pivotPosition, Collider surface)
+        {
+            float half = Mathf.Max(_heldExtents.x, _heldExtents.z);
+            Vector3 bottom = pivotPosition - Vector3.up * _heldPivotToBottom;
+            Vector3 halfExtents = new Vector3(half, Mathf.Max(_heldExtents.y - 0.01f, 0.005f), half);
+            Vector3 center = bottom + Vector3.up * (0.01f + halfExtents.y);
+            int n = Physics.OverlapBoxNonAlloc(center, halfExtents, _overlapBuffer, Quaternion.identity, placeMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < n; i++)
+            {
+                Collider c = _overlapBuffer[i];
+                if (c == surface || IsOwnBody(c) || c.attachedRigidbody != null)
+                    continue; // loose items nearby are not walls - they just get nudged, as before
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Before a throw lets go: the item in the hand sits ~0.65 m in front of the camera - past the face of a
+        /// wall / door the player stands against (the capsule stops ~0.22 m from it), sometimes past the whole
+        /// wall. Pull the item back along the camera-to-item line until the camera can see its centre and nothing
+        /// solid overlaps it (at worst to the camera itself, which is inside the player's capsule). The direction
+        /// and speed of the throw are not touched.
+        /// </summary>
+        private void MoveToSafeRelease(Interactable obj)
+        {
+            Vector3 eye = aimSource.position;
+            Vector3 center = obj.transform.TransformPoint(_heldLocalCenter);
+            Vector3 toCenter = center - eye;
+            float dist = toCenter.magnitude;
+            if (dist < 0.0001f)
+                return;
+            Vector3 dir = toCenter / dist;
+            float radius = Mathf.Clamp(Mathf.Max(_heldExtents.x, Mathf.Max(_heldExtents.y, _heldExtents.z)), 0.02f, 0.3f);
+
+            // A wall between the eye and the item: the item is inside it or already through it.
+            float d = dist;
+            if (Physics.Raycast(eye, dir, out RaycastHit block, dist, ~0, QueryTriggerInteraction.Ignore)
+                && !IsOwnBody(block.collider) && block.collider.attachedRigidbody == null)
+                d = Mathf.Max(0f, block.distance - radius);
+
+            float step = Mathf.Max(d / 8f, 0.01f);
+            while (d > 0f && SphereBlocked(eye + dir * d, radius))
+                d = d > step ? d - step : 0f;
+
+            if (d < dist - 0.0001f)
+                obj.transform.position += eye + dir * d - center;
+        }
+
+        private bool SphereBlocked(Vector3 center, float radius)
+        {
+            int n = Physics.OverlapSphereNonAlloc(center, radius, _overlapBuffer, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < n; i++)
+                if (!IsOwnBody(_overlapBuffer[i]) && _overlapBuffer[i].attachedRigidbody == null)
+                    return true; // only structure counts - walls, doors, floors, furniture
+            return false;
+        }
+
+        private bool IsOwnBody(Collider c) => c != null && (c == _ownBody || c.transform.IsChildOf(transform));
+
+        /// <summary>A just-thrown item passes through the thrower's capsule for a moment (it may have been pulled back into it).</summary>
+        private void IgnoreOwnBodyBriefly(Collider[] colliders)
+        {
+            if (_ownBody == null || colliders == null || throwIgnoreBodyTime <= 0f)
+                return;
+            foreach (var col in colliders)
+                if (col != null && col.enabled)
+                    Physics.IgnoreCollision(col, _ownBody, true);
+            StartCoroutine(RestoreOwnBody(colliders));
+        }
+
+        private IEnumerator RestoreOwnBody(Collider[] colliders)
+        {
+            yield return new WaitForSeconds(throwIgnoreBodyTime);
+            if (_ownBody == null)
+                yield break;
+            // Every collider, enabled or not: an ignore survives disable / enable, and an item caught again within
+            // the window has its colliders off in the hand - skipping them left it passing through the player for good.
+            foreach (var col in colliders)
+                if (col != null)
+                    Physics.IgnoreCollision(col, _ownBody, false);
         }
 
         private void Place()
@@ -423,12 +595,15 @@ namespace CreatureExperiment.Player
         private void Throw()
         {
             Interactable obj = _held;
+            Collider[] cols = _heldColliders;
             _held = null;
             obj.Release(this);
             obj.SetInFlight(true);
 
             obj.transform.SetParent(null, worldPositionStays: true);
-            EnableColliders(_heldColliders);
+            MoveToSafeRelease(obj);
+            EnableColliders(cols);
+            IgnoreOwnBodyBriefly(cols);
             _heldColliders = null;
 
             var body = obj.Body;
@@ -457,12 +632,15 @@ namespace CreatureExperiment.Player
                 ? hit.point
                 : ray.GetPoint(strongAimRange);
 
+            Collider[] cols = _heldColliders;
             _held = null;
             obj.Release(this);
             obj.SetInFlight(true);
 
             obj.transform.SetParent(null, worldPositionStays: true);
-            EnableColliders(_heldColliders);
+            MoveToSafeRelease(obj);
+            EnableColliders(cols);
+            IgnoreOwnBodyBriefly(cols);
             _heldColliders = null;
 
             var body = obj.Body;
@@ -505,6 +683,19 @@ namespace CreatureExperiment.Player
                 return;
             foreach (var col in colliders)
                 if (col != null) col.enabled = true;
+        }
+
+        private static bool TryGetBounds(Collider[] colliders, out Bounds bounds)
+        {
+            bool hasBounds = false;
+            bounds = default;
+            foreach (var col in colliders)
+            {
+                if (col == null || !col.enabled) continue;
+                if (!hasBounds) { bounds = col.bounds; hasBounds = true; }
+                else bounds.Encapsulate(col.bounds);
+            }
+            return hasBounds;
         }
 
         private static float ComputePivotToBottom(Transform t, Collider[] colliders)

@@ -6,16 +6,17 @@ namespace CreatureExperiment.DailyLife
 {
     /// <summary>
     /// A plate a meal is served on: three independent spots - fried egg, fried bacon, bread (raw or
-    /// toasted) - at most one of each, any mix. No recipes. An <see cref="IOptionalHeldItemReceiver"/>:
+    /// toasted) - at most one of each, any mix. No recipes. A dedicated <see cref="IOptionalHeldItemReceiver"/>:
     /// while the player holds food, aiming at the plate offers "올려놓기" when that food's spot is free and
-    /// a reject prompt otherwise; with other items in hand it is a plain pickup-able plate.
+    /// a reject prompt otherwise; any other held item is refused (no swap, never placed on the plate). With empty
+    /// hands it is a plain pickup-able plate. Food thrown onto it is caught the same way (<see cref="IThrownItemReceiver"/>).
     ///
     /// Served food rides the plate (parented, held still) and can still be picked back off one by one.
     /// A plate with at least one edible food on it is a meal: <see cref="Eat"/> destroys the whole plate,
     /// food included (the primary action does it - see <c>MealEater</c>).
     /// </summary>
     [RequireComponent(typeof(Interactable))]
-    public class MealPlate : MonoBehaviour, IOptionalHeldItemReceiver
+    public class MealPlate : MonoBehaviour, IOptionalHeldItemReceiver, IThrownItemReceiver
     {
         /// <summary>Raised when a meal is eaten, just before the plate is destroyed. Nothing listens yet.</summary>
         public static event Action<MealPlate> Eaten;
@@ -23,11 +24,14 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private Transform eggPoint;
         [SerializeField] private Transform baconPoint;
         [SerializeField] private Transform breadPoint;
+        [Tooltip("Catch assist for thrown food: how far past the plate's collider edge (m) a falling throw still lands on it.")]
+        [SerializeField] private float catchMargin = 0.06f;
 
         [Header("Labels")]
         [SerializeField] private string placePrompt = "올려놓기";
         [SerializeField] private string wrongFoodPrompt = "익히지 않은 계란·베이컨은 올릴 수 없습니다";
         [SerializeField] private string occupiedPrompt = "이미 올려져 있습니다";
+        [SerializeField] private string notFoodPrompt = "놓을 수 없습니다";
         [SerializeField] private string emptyName = "접시";
         [SerializeField] private string mealName = "식사 (좌클릭: 먹기)";
 
@@ -68,6 +72,8 @@ namespace CreatureExperiment.DailyLife
 
         // --- IOptionalHeldItemReceiver
         public float MaxReach => 0f;
+        public bool IsDedicated => true;
+        public float CatchMargin => catchMargin;
 
         public bool AppliesTo(Interactable item) => item != null && item.GetComponent<FoodItem>() != null;
 
@@ -80,7 +86,9 @@ namespace CreatureExperiment.DailyLife
         public string GetRejectPrompt(Interactable item)
         {
             var food = item != null ? item.GetComponent<FoodItem>() : null;
-            return food != null && SeatFor(item) == null ? wrongFoodPrompt : occupiedPrompt;
+            if (food == null)
+                return notFoodPrompt;
+            return SeatFor(item) == null ? wrongFoodPrompt : occupiedPrompt;
         }
 
         public void Receive(Interactable item)

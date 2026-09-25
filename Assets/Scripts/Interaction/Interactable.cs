@@ -27,6 +27,10 @@ namespace CreatureExperiment.Interaction
         [Header("Identity")]
         [Tooltip("Stable identifier for what kind of item this is (e.g. \"EmptyCan\"). Kept in records that outlive the object, like a GarbageDump's discard list. Falls back to the GameObject name.")]
         [SerializeField] private string itemId;
+        [Tooltip("What this item IS (identity, several allowed) - e.g. Food | Ingredient for an egg. Never what it can do: that is its components.")]
+        [SerializeField] private ItemTag tags;
+
+        [Header("Policy")]
         [Tooltip("Can be thrown away in a GarbageDump. Off for items that must not disappear (work items).")]
         [SerializeField] private bool discardable;
 
@@ -52,6 +56,18 @@ namespace CreatureExperiment.Interaction
 
         /// <summary>What kind of item this is - survives as plain data after the object itself is gone.</summary>
         public string ItemId => string.IsNullOrEmpty(itemId) ? gameObject.name : itemId;
+
+        /// <summary>Change the kind at runtime (a drunk drink becomes "EmptyCan").</summary>
+        public void SetItemId(string value) => itemId = value;
+
+        /// <summary>Identity tags - what this item is (see <see cref="ItemTag"/>).</summary>
+        public ItemTag Tags => tags;
+
+        /// <summary>True if this item has at least one of <paramref name="any"/>.</summary>
+        public bool HasAny(ItemTag any) => (tags & any) != 0;
+
+        /// <summary>True if this item has every one of <paramref name="all"/>.</summary>
+        public bool HasAll(ItemTag all) => (tags & all) == all;
 
         /// <summary>True if this item may be thrown away in a GarbageDump.</summary>
         public bool IsDiscardable => discardable;
@@ -93,6 +109,20 @@ namespace CreatureExperiment.Interaction
         public Object LastThrower { get; private set; }
         public float LastThrowTime { get; private set; } = float.NegativeInfinity;
 
+        private float _throwOutcomeTime = float.NegativeInfinity;
+
+        /// <summary>
+        /// Claim "what this throw did" (landed in a pan, ...) - true once per throw, only for a recorded throw at
+        /// most <paramref name="maxAge"/> seconds old. Keeps one throw from being caught twice.
+        /// </summary>
+        public bool ClaimThrowOutcome(float maxAge)
+        {
+            if (LastThrowMode == ThrowMode.None || _throwOutcomeTime == LastThrowTime || Time.time - LastThrowTime > maxAge)
+                return false;
+            _throwOutcomeTime = LastThrowTime;
+            return true;
+        }
+
         public void RecordThrow(ThrowMode mode, Object thrower)
         {
             LastThrowMode = mode;
@@ -123,11 +153,30 @@ namespace CreatureExperiment.Interaction
                 Holder = null;
         }
 
+        /// <summary>
+        /// How this object was moving just before the physics step that produced the current collision callback:
+        /// captured every FixedUpdate (which runs before the step), so inside OnCollisionEnter - where the body
+        /// already shows the bounce - these are still the incoming values. Zero / current pose while kinematic.
+        /// One shared snapshot for every impact rule (egg break, knife stick / stain, carton break, thrown catch).
+        /// </summary>
+        public Vector3 PreImpactVelocity { get; private set; }
+        public float PreImpactSpeed => PreImpactVelocity.magnitude;
+        public Vector3 PreImpactPosition { get; private set; }
+        public Quaternion PreImpactRotation { get; private set; } = Quaternion.identity;
+
         private void Awake()
         {
             _body = GetComponent<Rigidbody>();
             if (outlineRenderer != null)
                 outlineRenderer.enabled = false;
+        }
+
+        private void FixedUpdate()
+        {
+            var body = Body;
+            PreImpactVelocity = body.isKinematic ? Vector3.zero : body.linearVelocity;
+            PreImpactPosition = body.position;
+            PreImpactRotation = body.rotation;
         }
 
         /// <summary>Turn the outline on or off. Called by <c>PlayerInteractor</c> as focus changes.</summary>

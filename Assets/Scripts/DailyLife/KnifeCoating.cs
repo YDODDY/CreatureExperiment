@@ -7,8 +7,8 @@ namespace CreatureExperiment.DailyLife
     /// <summary>
     /// What is on the knife's blade (jam, butter or nothing) and the knife's primary action.
     ///
-    /// <see cref="Use"/> (Left Click while held, routed by <c>MealEater</c>) acts on what the player aims at:
-    /// a <see cref="SpreadSource"/> coats the blade (replacing any coating); a bread with nothing on it takes
+    /// <see cref="Use"/> (Left Click while held - <see cref="PrimaryPress"/>, routed by <c>MealEater</c>) acts on what the player aims at:
+    /// a <see cref="SpreadSource"/> that is not empty coats the blade (replacing any coating, one use of the source); a bread with nothing on it takes
     /// the coating (<see cref="FoodItem.TryApplyTopping"/>) and the blade is clean again. Anything else: nothing.
     /// A future cut on a cuttable target belongs in <see cref="Use"/> too - not built yet.
     ///
@@ -19,7 +19,7 @@ namespace CreatureExperiment.DailyLife
     /// <see cref="KnifeStick"/>: a strong throw into a door both stains and sticks.
     /// </summary>
     [RequireComponent(typeof(Interactable))]
-    public class KnifeCoating : MonoBehaviour
+    public class KnifeCoating : MonoBehaviour, IHeldPrimaryAction
     {
         /// <summary>Raised when the coating leaves on an impact: knife, what it was, the surface, contact point. Nothing listens yet.</summary>
         public static event Action<KnifeCoating, SpreadType, Collider, Vector3> Transferred;
@@ -37,9 +37,12 @@ namespace CreatureExperiment.DailyLife
         [Tooltip("Lift off the surface, against z-fighting.")]
         [SerializeField] private float surfaceOffset = 0.003f;
 
+        [Header("Primary action")]
+        [Tooltip("Reach of Left Click with the knife in hand.")]
+        [SerializeField] private float primaryReach = 1.5f;
+
         private Interactable _item;
         private SpreadType _spread;
-        private Vector3 _lastVelocity;
 
         public SpreadType CurrentSpread => _spread;
 
@@ -55,6 +58,14 @@ namespace CreatureExperiment.DailyLife
 
         public void ClearSpread() => SetSpread(SpreadType.None);
 
+        /// <summary>Left Click while held (<see cref="IHeldPrimaryAction"/>): <see cref="Use"/> on what the centre ray hits within reach.</summary>
+        public bool PrimaryPress(Ray aim)
+        {
+            if (Physics.Raycast(aim, out RaycastHit hit, primaryReach, ~0, QueryTriggerInteraction.Ignore))
+                Use(hit.collider);
+            return true;
+        }
+
         /// <summary>The knife's primary action on <paramref name="target"/> (what the player aims at). True if something happened.</summary>
         public bool Use(Collider target)
         {
@@ -64,6 +75,11 @@ namespace CreatureExperiment.DailyLife
             var source = target.GetComponentInParent<SpreadSource>();
             if (source != null && source.Spread != SpreadType.None)
             {
+                // Already carrying this spread: nothing changes, nothing is used up. Empty source: no coating.
+                if (_spread == source.Spread)
+                    return true;
+                if (!source.TryUse())
+                    return false;
                 SetSpread(source.Spread);
                 return true;
             }
@@ -77,24 +93,48 @@ namespace CreatureExperiment.DailyLife
             return false;
         }
 
-        // Velocity before the solver resolves a contact (OnCollisionEnter already sees the bounce).
-        private void FixedUpdate()
+        /// <summary>
+        /// Thrown (F / Right Click) straight into a bread: the coating goes on it - same rule as the Left Click
+        /// spread (untopped bread only) - and the blade is clean. One coating, so one transfer. Called from here and,
+        /// first, from <see cref="KnifeStick"/> before it decides whether the knife sticks into that bread.
+        /// </summary>
+        public bool TrySpreadOnThrownHit(Collision collision)
         {
-            var body = Item.Body;
-            if (!body.isKinematic)
-                _lastVelocity = body.linearVelocity;
+            if (_spread == SpreadType.None) { LastSpreadResult = "no coating"; return false; }
+            if (Item.IsHeld) { LastSpreadResult = "knife held"; return false; }
+            if (Item.LastThrowMode == ThrowMode.None) { LastSpreadResult = "not thrown"; return false; }
+            var bread = collision.collider.GetComponentInParent<FoodItem>();
+            if (bread == null) { LastSpreadResult = "not food"; return false; }
+            if (bread.Interactable.IsHeld) { LastSpreadResult = "food held"; return false; }
+            if (!bread.TryApplyTopping(_spread)) { LastSpreadResult = "refused (not bread / already topped)"; return false; }
+            SpreadType spread = _spread;
+            ClearSpread();
+            LastSpreadResult = "ok";
+            Transferred?.Invoke(this, spread, collision.collider, collision.GetContact(0).point);
+            return true;
         }
+
+        /// <summary>Why the last thrown-hit spread did or did not happen (diagnostics).</summary>
+        public string LastSpreadResult { get; private set; } = "";
 
         private void OnCollisionEnter(Collision collision)
         {
             if (_spread == SpreadType.None || Item.IsHeld)
                 return;
-            if (collision.collider is CharacterController || collision.rigidbody != null)
-                return; // the player's body / moving bodies: no stain for now, the coating stays
+            if (collision.collider is CharacterController)
+                return;
+            bool spreadHere = TrySpreadOnThrownHit(collision);
+            if (TryGetComponent(out KnifeStick stick))
+                stick.Trace($"SPREAD (coating) {(spreadHere ? "ok" : "no: " + LastSpreadResult)} on {collision.gameObject.name}");
+            if (spreadHere)
+                return;
+
+            if (collision.rigidbody != null)
+                return; // moving bodies (items, the creature): no stain for now, the coating stays
 
             ContactPoint contact = collision.GetContact(0);
             Vector3 normal = contact.normal;
-            if (Vector3.Dot(normal, _lastVelocity) > 0f)
+            if (Vector3.Dot(normal, Item.PreImpactVelocity) > 0f)
                 normal = -normal; // face back toward where the knife came from
             if (Mathf.Abs(Vector3.Dot(collision.relativeVelocity, normal)) < transferSpeed)
                 return;

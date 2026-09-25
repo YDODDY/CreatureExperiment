@@ -50,6 +50,9 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private GameObject cookedVisual;
         [Tooltip("Optional look for raw food before it first goes into a pan (an egg in its shell).")]
         [SerializeField] private GameObject uncrackedVisual;
+        [Tooltip("BoxCollider size / centre while the uncracked look shows (a whole egg is a shell, not a fried-egg disc). Zero size = the collider never changes.")]
+        [SerializeField] private Vector3 uncrackedColliderSize;
+        [SerializeField] private Vector3 uncrackedColliderCenter;
 
         [Header("Topping (bread only)")]
         [SerializeField] private SpreadType topping;
@@ -68,6 +71,8 @@ namespace CreatureExperiment.DailyLife
         private bool _cracked;
         private float _puffTime = -1f;
         private Vector3 _puffPos, _puffScale;
+        private BoxCollider _box;
+        private Vector3 _boxSize, _boxCenter;
 
         public FoodKind Kind => kind;
         public FoodState State => state;
@@ -75,6 +80,9 @@ namespace CreatureExperiment.DailyLife
         public bool IsEdible => IsCooked || edibleRaw;
         public SpreadType Topping => topping;
         public float CookProgress01 => cookTime > 0f ? Mathf.Clamp01(_cookProgress / cookTime) : 1f;
+
+        /// <summary>A raw egg still in its shell, loose (not in a pan / on a plate) - one that can go back into egg storage.</summary>
+        public bool IsWholeRawEgg => kind == FoodKind.Egg && state == FoodState.Raw && !_cracked && Slot == null && Plate == null;
 
         /// <summary>The pan slot holding this food, or null. Set by <see cref="FoodSlot"/>.</summary>
         public FoodSlot Slot { get; private set; }
@@ -87,6 +95,11 @@ namespace CreatureExperiment.DailyLife
         private void Awake()
         {
             _interactable = GetComponent<Interactable>();
+            if (uncrackedColliderSize != Vector3.zero && TryGetComponent(out _box))
+            {
+                _boxSize = _box.size;
+                _boxCenter = _box.center;
+            }
             RefreshVisuals();
             if (cookPuff != null)
             {
@@ -97,6 +110,13 @@ namespace CreatureExperiment.DailyLife
         }
 
         internal void SetPlate(MealPlate plate) => Plate = plate;
+
+        // Thrown (F / Right Click) onto the top of a pan / plate that takes it: caught there like an E hand-over.
+        private void OnCollisionEnter(Collision collision)
+        {
+            if (Slot == null && Plate == null)
+                ThrownItemCatch.TryCatch(Interactable, collision);
+        }
 
         internal void SetSlot(FoodSlot slot)
         {
@@ -177,6 +197,11 @@ namespace CreatureExperiment.DailyLife
             if (cookedVisual != null) cookedVisual.SetActive(cooked);
             if (uncrackedVisual != null) uncrackedVisual.SetActive(showUncracked);
             if (rawVisual != null) rawVisual.SetActive(!cooked && !showUncracked);
+            if (_box != null)
+            {
+                _box.size = showUncracked ? uncrackedColliderSize : _boxSize;
+                _box.center = showUncracked ? uncrackedColliderCenter : _boxCenter;
+            }
             if (jamTopping != null) jamTopping.SetActive(topping == SpreadType.Jam);
             if (butterTopping != null) butterTopping.SetActive(topping == SpreadType.Butter);
         }

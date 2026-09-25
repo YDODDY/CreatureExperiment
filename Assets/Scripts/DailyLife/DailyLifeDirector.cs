@@ -21,6 +21,11 @@ namespace CreatureExperiment.DailyLife
     ///
     /// Interactions call in: WorkplaceAttendance (clock in/out), <see cref="OnEnteredHome"/> (HomeArrival
     /// trigger), <see cref="UseBed"/> (Bed). A day rollover raises <see cref="DayStarted"/>.
+    ///
+    /// The routine, not a clock, sets the lighting: a day starting sets <see cref="LightingEnvironment"/> to
+    /// Day, a clock-out sets it to Night (optional reference - the loop works without it). Sleeping is a
+    /// separate permission, <see cref="CanSleep"/>: false until the day's clock-out, false again once a new
+    /// day starts. The bed checks that, never the lighting state.
     /// </summary>
     public class DailyLifeDirector : MonoBehaviour
     {
@@ -32,6 +37,11 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private Transform player;
         [Tooltip("Where the player is placed at the start of each day. Position/rotation only - not used for any phase test.")]
         [SerializeField] private Transform homeSpawn;
+        [Tooltip("Optional. Set to Day when a day starts and to Night on clock-out.")]
+        [SerializeField] private LightingEnvironment lighting;
+
+        [Header("Messages")]
+        [SerializeField] private string notTimeToSleepMessage = "아직 잘 시간이 아니다.";
 
         [Header("Setup")]
         [Tooltip("Day number the first day starts on.")]
@@ -40,11 +50,14 @@ namespace CreatureExperiment.DailyLife
         [Header("State (read-only, for debugging)")]
         [SerializeField] private int day = 1;
         [SerializeField] private DayPhase phase = DayPhase.CommuteToWork;
+        [SerializeField] private bool canSleep;
 
         private string _lastObjective;
 
         public int Day => day;
         public DayPhase Phase => phase;
+        /// <summary>Whether the bed may end the day: true only after today's clock-out. Independent of the lighting state.</summary>
+        public bool CanSleep => canSleep;
 
         /// <summary>Raised after the bed rolls the day over, with the new day number. Listeners reset their own per-day state.</summary>
         public event System.Action<int> DayStarted;
@@ -57,6 +70,8 @@ namespace CreatureExperiment.DailyLife
         private void Start()
         {
             phase = DayPhase.CommuteToWork;
+            canSleep = false;
+            SetLighting(LightingEnvironment.LightingState.Day);
             RefreshObjective(force: true);
         }
 
@@ -82,6 +97,8 @@ namespace CreatureExperiment.DailyLife
             if (phase != DayPhase.Working)
                 return;
             SetPhase(DayPhase.CommuteHome);
+            canSleep = true;
+            SetLighting(LightingEnvironment.LightingState.Night);
             Debug.Log($"[DailyLife] Day {day}: clocked OUT.");
         }
 
@@ -96,23 +113,32 @@ namespace CreatureExperiment.DailyLife
 
         /// <summary>
         /// HomeArrival trigger: the player walked back into the house. After a clock-out this is the normal
-        /// way home. Leaving the Workplace without clocking out is not blocked either - it also lets the
-        /// player sleep, and <see cref="WorkplaceAttendance.PreviousDayMissedClockOut"/> records it.
+        /// way home (CommuteHome -> Sleep). Coming home without clocking out is not blocked, but the phase
+        /// stays Working and <see cref="CanSleep"/> stays false - the player has to go back and clock out.
         /// </summary>
         public void OnEnteredHome()
         {
-            if (phase == DayPhase.CommuteHome || phase == DayPhase.Working)
+            if (phase == DayPhase.Working)
             {
-                if (phase == DayPhase.Working)
-                    Debug.Log($"[DailyLife] Day {day}: home without clocking out.");
+                Debug.Log($"[DailyLife] Day {day}: home without clocking out - can't sleep until clock-out.");
+                return;
+            }
+            if (phase == DayPhase.CommuteHome)
+            {
                 SetPhase(DayPhase.Sleep);
                 Debug.Log($"[DailyLife] Day {day}: home. Use the bed to sleep.");
             }
         }
 
-        /// <summary>Bed: end the day and roll to the next. Gated on being in the Sleep phase.</summary>
+        /// <summary>Bed: end the day and roll to the next. Gated on <see cref="CanSleep"/> (short notice if not) and the Sleep phase.</summary>
         public void UseBed()
         {
+            if (!canSleep)
+            {
+                if (objectiveHud != null)
+                    objectiveHud.ShowNotice(notTimeToSleepMessage);
+                return;
+            }
             if (phase != DayPhase.Sleep)
                 return;
 
@@ -125,9 +151,17 @@ namespace CreatureExperiment.DailyLife
             }
 
             day++;
+            canSleep = false;
             SetPhase(DayPhase.CommuteToWork);
+            SetLighting(LightingEnvironment.LightingState.Day);
             Debug.Log($"[DailyLife] Slept. Day {day} begins.");
             DayStarted?.Invoke(day);
+        }
+
+        private void SetLighting(LightingEnvironment.LightingState state)
+        {
+            if (lighting != null)
+                lighting.SetState(state);
         }
 
         // --- objective text --------------------------------------------

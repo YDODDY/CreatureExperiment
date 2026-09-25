@@ -53,6 +53,12 @@ namespace CreatureExperiment.Player
         /// <summary>True for exactly the one Update() frame a jump was actually triggered (mirrors the InputAction.WasPressedThisFrame one-frame-pulse idiom already used below) - a one-shot edge for "a jump just happened", not a continuous "is airborne" state. Movement itself is unaffected by this property; it only mirrors the existing trigger condition for read-only seams.</summary>
         public bool JumpedThisFrame { get; private set; }
 
+        /// <summary>True while the Move action (WASD) is actually being pushed this frame and this component is running. Pure input, not velocity - mouse look, jumping, being pushed or riding a door never count. Read-only seam for the corridor SensorLight; movement itself is unchanged.</summary>
+        public bool HasMovementInput => isActiveAndEnabled && _moveInputSqrMagnitude > MovementInputThreshold * MovementInputThreshold;
+
+        private const float MovementInputThreshold = 0.1f;
+        private float _moveInputSqrMagnitude;
+
         private void Awake()
         {
             _controller = GetComponent<CharacterController>();
@@ -80,6 +86,7 @@ namespace CreatureExperiment.Player
             _jumpAction?.Disable();
             _sprintAction?.Disable();
             _crouchAction?.Disable();
+            _moveInputSqrMagnitude = 0f;
         }
 
         private void Update()
@@ -91,6 +98,7 @@ namespace CreatureExperiment.Player
             UpdateHeight(dt);
 
             Vector2 input = _moveAction.ReadValue<Vector2>();
+            _moveInputSqrMagnitude = input.sqrMagnitude;
             Vector3 move = transform.right * input.x + transform.forward * input.y;
             if (move.sqrMagnitude > 1f)
                 move.Normalize();

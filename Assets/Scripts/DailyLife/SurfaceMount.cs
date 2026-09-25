@@ -10,6 +10,8 @@ namespace CreatureExperiment.DailyLife
     /// </summary>
     internal static class SurfaceMount
     {
+        private const string AnchorName = "SurfaceAnchor";
+
         public static Transform For(Collider surface)
         {
             for (Transform t = surface != null ? surface.transform : null; t != null; t = t.parent)
@@ -20,6 +22,29 @@ namespace CreatureExperiment.DailyLife
 
         /// <summary>Parent <paramref name="obj"/> to the mount for <paramref name="surface"/>, keeping its world pose.</summary>
         public static void Attach(Transform obj, Collider surface) => obj.SetParent(For(surface), worldPositionStays: true);
+
+        /// <summary>
+        /// Mount for a surface mark (sticker, tape strip). Same as <see cref="For"/>, except that a moving surface
+        /// (one with a Rigidbody - a packing box) whose whole chain is stretched gets an unscaled child anchor
+        /// (inverse scale, made once) so the mark still rides it undistorted. Null = static world surface.
+        /// </summary>
+        public static Transform ForMark(Collider surface)
+        {
+            Transform mount = For(surface);
+            if (mount != null || surface == null || surface.attachedRigidbody == null)
+                return mount;
+
+            Transform host = surface.transform;
+            Transform anchor = host.Find(AnchorName);
+            if (anchor == null)
+            {
+                anchor = new GameObject(AnchorName).transform;
+                anchor.SetParent(host, worldPositionStays: false);
+                Vector3 s = host.lossyScale;
+                anchor.localScale = new Vector3(1f / s.x, 1f / s.y, 1f / s.z);
+            }
+            return anchor;
+        }
 
         private static bool IsUniform(Vector3 s)
         {

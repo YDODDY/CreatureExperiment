@@ -26,7 +26,7 @@ namespace CreatureExperiment.DailyLife
             var work = held.GetComponent<WorkItem>();
             bool isWorkThing = work != null
                 || held.GetComponent<PackingBox>() != null
-                || held.GetComponent<TapeItem>() != null
+                || held.GetComponent<TapeRoll>() != null
                 || held.GetComponent<FragileStickerItem>() != null;
             if (!isWorkThing)
                 return;

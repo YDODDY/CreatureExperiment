@@ -5,8 +5,10 @@ namespace CreatureExperiment.DailyLife
 {
     /// <summary>
     /// A one-food spot on a pick-up-able object - the frying pan (<see cref="cooks"/> on).
-    /// An <see cref="IOptionalHeldItemReceiver"/>: while the player holds food, aiming at the object
-    /// offers "올려놓기"; with anything else in hand the object is a plain item (pickup / swap / place on).
+    /// A dedicated <see cref="IOptionalHeldItemReceiver"/>: while the player holds food, aiming at the object
+    /// offers "올려놓기"; any other held item is refused ("놓을 수 없습니다") - no swap, never placed on the pan.
+    /// With empty hands the pan is a plain pickup. Food thrown onto it (F / Right Click) is caught the same way
+    /// (<see cref="IThrownItemReceiver"/>).
     ///
     /// Received food is parented to <see cref="foodPoint"/> (so it travels with the pan), held still and
     /// kept from colliding with its host (<see cref="FoodMount"/>). It stays a normal
@@ -14,16 +16,20 @@ namespace CreatureExperiment.DailyLife
     /// the food is held again, leaves the point, or is gone (eaten).
     /// </summary>
     [RequireComponent(typeof(Interactable))]
-    public class FoodSlot : MonoBehaviour, IOptionalHeldItemReceiver
+    public class FoodSlot : MonoBehaviour, IOptionalHeldItemReceiver, IThrownItemReceiver
     {
         [Tooltip("Where the food's pivot (its bottom) sits.")]
         [SerializeField] private Transform foodPoint;
         [Tooltip("Food here cooks while this object sits on a stove burner (the frying pan).")]
         [SerializeField] private bool cooks;
+        [Tooltip("Catch assist for thrown food: how far past the pan's collider edge (m) a falling throw still lands in it.")]
+        [SerializeField] private float catchMargin = 0.06f;
 
         [Header("Focus label")]
         [SerializeField] private string placePrompt = "올려놓기";
         [SerializeField] private string occupiedPrompt = "이미 음식이 있습니다";
+        [Tooltip("Shown for a held item that is not food (the pan owns the aim - nothing is swapped or placed on it).")]
+        [SerializeField] private string notFoodPrompt = "놓을 수 없습니다";
 
         private Interactable _host;
         private FoodItem _food;
@@ -45,12 +51,19 @@ namespace CreatureExperiment.DailyLife
 
         // --- IOptionalHeldItemReceiver
         public float MaxReach => 0f;
+        public bool IsDedicated => true;
+        public float CatchMargin => catchMargin;
 
         public bool AppliesTo(Interactable item) => item != null && item.GetComponent<FoodItem>() != null;
 
         public bool CanReceive(Interactable item) => item != null && !IsOccupied && !Host.IsHeld && item.GetComponent<FoodItem>() != null;
 
-        public string GetRejectPrompt(Interactable item) => IsOccupied ? occupiedPrompt : null;
+        public string GetRejectPrompt(Interactable item)
+        {
+            if (item == null || item.GetComponent<FoodItem>() == null)
+                return notFoodPrompt;
+            return IsOccupied ? occupiedPrompt : null;
+        }
 
         public void Receive(Interactable item)
         {

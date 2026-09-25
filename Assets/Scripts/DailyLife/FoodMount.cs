@@ -11,12 +11,18 @@ namespace CreatureExperiment.DailyLife
     /// </summary>
     internal static class FoodMount
     {
-        /// <summary>Seat <paramref name="item"/> on <paramref name="point"/>. Returns the food's colliders.</summary>
+        /// <summary>
+        /// Seat <paramref name="item"/> on <paramref name="point"/>. The food keeps its own world size - a
+        /// scaled plate / pan doesn't grow or shrink what is put on it. Returns the food's colliders.
+        /// </summary>
         public static Collider[] Attach(Interactable item, Transform point)
         {
+            Vector3 worldScale = item.transform.lossyScale;
             item.transform.SetParent(point, worldPositionStays: false);
             item.transform.localPosition = Vector3.zero;
             item.transform.localRotation = Quaternion.identity;
+            Vector3 p = point.lossyScale;
+            item.transform.localScale = new Vector3(worldScale.x / p.x, worldScale.y / p.y, worldScale.z / p.z);
 
             var body = item.Body;
             body.isKinematic = true;
@@ -33,19 +39,21 @@ namespace CreatureExperiment.DailyLife
         }
 
         /// <summary>
-        /// Only live colliders: a disabled collider can't take the call, and disabling one already drops
-        /// its ignore pairs (picking up / placing the host toggles its colliders, so callers re-assert).
+        /// Ignoring (while seated) is asserted on live colliders only; callers re-assert every frame.
+        /// Un-ignoring (on release) covers every pair, enabled or not: an ignore survives a collider being disabled
+        /// and re-enabled on this Unity version, and the food is usually picked up - its colliders already off -
+        /// when the slot lets go. Skipping those left the food unable to touch that pan / plate for good.
         /// </summary>
         public static void IgnoreHost(Component host, Collider[] foodColliders, bool ignore)
         {
-            if (foodColliders == null)
+            if (foodColliders == null || host == null)
                 return;
             foreach (var hostCol in host.GetComponents<Collider>())
             {
-                if (hostCol == null || !hostCol.enabled || !hostCol.gameObject.activeInHierarchy)
+                if (hostCol == null || (ignore && (!hostCol.enabled || !hostCol.gameObject.activeInHierarchy)))
                     continue;
                 foreach (var foodCol in foodColliders)
-                    if (foodCol != null && foodCol.enabled && foodCol.gameObject.activeInHierarchy)
+                    if (foodCol != null && (!ignore || (foodCol.enabled && foodCol.gameObject.activeInHierarchy)))
                         Physics.IgnoreCollision(hostCol, foodCol, ignore);
             }
         }

@@ -63,7 +63,7 @@ namespace CreatureExperiment.DailyLife
                 return !work.IsResolved && shift.CanAcceptWork;
             if (box != null)
                 return !box.HasItem;
-            return item.GetComponent<TapeItem>() != null || item.GetComponent<FragileStickerItem>() != null;
+            return item.GetComponent<FragileStickerItem>() != null; // the tape roll is a reusable tool, never rubbish
         }
 
         public string GetRejectPrompt(Interactable item)
@@ -106,7 +106,7 @@ namespace CreatureExperiment.DailyLife
                 return;
             }
 
-            // Empty box / tape / sticker: plain rubbish.
+            // Empty box / sticker: plain rubbish.
             Destroy(item.gameObject);
         }
 

@@ -11,6 +11,9 @@ namespace CreatureExperiment.DailyLife
     /// string centred at the top of the screen with the built-in font, so the loop is testable with
     /// zero UI setup - the counts ("4/6") always read correctly there even if the Hangul shows as
     /// boxes until a font is wired.
+    ///
+    /// <see cref="ShowNotice"/> adds a short second line under the objective for a few seconds (e.g. the
+    /// bed refusing: "아직 잘 시간이 아니다.").
     /// </summary>
     public class ObjectiveHUD : MonoBehaviour
     {
@@ -19,9 +22,14 @@ namespace CreatureExperiment.DailyLife
         [Tooltip("Also draw the objective with OnGUI at the top of the screen (works with no UI set up).")]
         [SerializeField] private bool alsoDrawOnGUI = true;
         [SerializeField] private int onGuiFontSize = 24;
+        [SerializeField] private int noticeFontSize = 20;
+        [SerializeField] private float noticeSeconds = 2.5f;
 
         private string _current = "";
         private GUIStyle _style;
+        private GUIStyle _noticeStyle;
+        private string _notice = "";
+        private float _noticeUntil;
 
         private void Awake()
         {
@@ -36,8 +44,16 @@ namespace CreatureExperiment.DailyLife
                 text.text = _current;
         }
 
+        /// <summary>Show a short line under the objective for <see cref="noticeSeconds"/>.</summary>
+        public void ShowNotice(string value)
+        {
+            _notice = value ?? "";
+            _noticeUntil = Time.time + noticeSeconds;
+        }
+
         private void OnGUI()
         {
+            DrawNotice();
             if (!alsoDrawOnGUI || string.IsNullOrEmpty(_current))
                 return;
 
@@ -60,6 +76,32 @@ namespace CreatureExperiment.DailyLife
             GUI.Label(new Rect(r.x + 2f, r.y + 2f, r.width, r.height), _current, _style);
             GUI.color = Color.white;
             GUI.Label(r, _current, _style);
+            GUI.color = prev;
+        }
+
+        private void DrawNotice()
+        {
+            if (string.IsNullOrEmpty(_notice) || Time.time > _noticeUntil)
+                return;
+
+            if (_noticeStyle == null)
+            {
+                _noticeStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = noticeFontSize,
+                    alignment = TextAnchor.UpperCenter,
+                    wordWrap = false,
+                };
+            }
+
+            const float w = 700f;
+            Rect r = new Rect((Screen.width - w) * 0.5f, 72f, w, 40f);
+
+            Color prev = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, 0.55f);
+            GUI.Label(new Rect(r.x + 2f, r.y + 2f, r.width, r.height), _notice, _noticeStyle);
+            GUI.color = Color.white;
+            GUI.Label(r, _notice, _noticeStyle);
             GUI.color = prev;
         }
     }
