@@ -16,6 +16,9 @@ namespace CreatureExperiment.DailyLife
     /// Player's feet must be between <see cref="minDepthBelow"/> and <see cref="maxDepthBelow"/> below the
     /// fixture, so floors above / below don't trigger it), plus an optional line-of-sight check so the
     /// Player moving on the other side of a wall doesn't count. Starts off.
+    ///
+    /// With <see cref="nightOnly"/> the sensor only works at night: <see cref="LightingEnvironment"/> calls
+    /// <see cref="SetNight"/> on every Day / Night switch, and by day the light stays off whatever the Player does.
     /// </summary>
     public class SensorLight : MonoBehaviour
     {
@@ -43,7 +46,12 @@ namespace CreatureExperiment.DailyLife
         [Header("Timer")]
         [SerializeField] private float motionHoldSeconds = 5.0f;
 
+        [Header("Day / Night")]
+        [Tooltip("Sensor works only while LightingEnvironment is Night; by day the light stays off.")]
+        [SerializeField] private bool nightOnly = true;
+
         private bool _isOn;
+        private bool _isNight = true;
         private float _lastMotionTime = float.NegativeInfinity;
 
         public bool IsOn => _isOn;
@@ -56,8 +64,23 @@ namespace CreatureExperiment.DailyLife
             SetOn(false);
         }
 
+        /// <summary>Called by <see cref="LightingEnvironment"/> whenever the Day / Night state is applied.</summary>
+        public void SetNight(bool night)
+        {
+            _isNight = night;
+            if (nightOnly && !night)
+            {
+                _lastMotionTime = float.NegativeInfinity;
+                if (_isOn)
+                    SetOn(false);
+            }
+        }
+
         private void Update()
         {
+            if (nightOnly && !_isNight)
+                return;
+
             if (player != null && player.HasMovementInput && IsInRange(player.transform))
                 _lastMotionTime = Time.time;
 

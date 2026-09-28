@@ -10,7 +10,8 @@ namespace CreatureExperiment.DailyLife
     /// <see cref="state"/> field can also be flipped in the Inspector while playing for a quick comparison
     /// (applied on the next frame). It sets the sun's intensity / color, the flat ambient color, the skybox
     /// material and the environment reflection intensity, and switches every <see cref="StreetLamp"/>
-    /// (off by day, on at night). No time of day, no sun movement; room and sensor lights are never touched.
+    /// (off by day, on at night) and tells every <see cref="SensorLight"/> whether it is night (night-only
+    /// sensors stay off by day). No time of day, no sun movement; room lights are never touched.
     /// Runtime only: edit mode keeps whatever the scene has saved (the Day values).
     /// </summary>
     public class LightingEnvironment : MonoBehaviour
@@ -45,6 +46,7 @@ namespace CreatureExperiment.DailyLife
 
         private Material _sceneSkybox;
         private StreetLamp[] _streetLamps;
+        private SensorLight[] _sensorLights;
         private LightingState _applied;
         private bool _hasApplied;
 
@@ -93,6 +95,12 @@ namespace CreatureExperiment.DailyLife
             foreach (StreetLamp lamp in _streetLamps)
                 if (lamp != null)
                     lamp.SetOn(lampsOn);
+
+            if (_sensorLights == null)
+                _sensorLights = FindObjectsByType<SensorLight>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (SensorLight sensor in _sensorLights)
+                if (sensor != null)
+                    sensor.SetNight(lampsOn);
 
             _applied = state;
             _hasApplied = true;

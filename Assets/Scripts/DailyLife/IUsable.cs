@@ -9,5 +9,12 @@ namespace CreatureExperiment.DailyLife
     public interface IUsable
     {
         void Use();
+
+        /// <summary>
+        /// False while this object is not a World Use target at all (a chair while the player is already
+        /// seated). The aim then treats it as a plain object - the press goes on to pickup / place - instead
+        /// of being spent on it. Default true.
+        /// </summary>
+        bool CanUse => true;
     }
 }

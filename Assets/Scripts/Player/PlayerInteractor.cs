@@ -93,6 +93,7 @@ namespace CreatureExperiment.Player
         private Vector3 _heldExtents;
         private CharacterController _ownBody;
         private readonly Collider[] _overlapBuffer = new Collider[16];
+        private readonly Collider[] _zoneBuffer = new Collider[32];
 
         // Per-frame aim resolution - what one Interact press would do right now (at most one is set).
         private IUsable _aimUsable;
@@ -180,6 +181,17 @@ namespace CreatureExperiment.Player
                 _aimUsable = _fallbackUse;
                 aimFocus = _fallbackUse as IFocusTarget ?? aimFocus;
             }
+            // A held item with its own Interact (a remote) may show its prompt on what it is aimed at.
+            IHeldInteractAction heldInteract = _held != null ? _held.GetComponent<IHeldInteractAction>() : null;
+            if (heldInteract != null)
+            {
+                IFocusTarget heldFocus = heldInteract.GetAimFocus(new Ray(aimSource.position, aimSource.forward), out string heldLabel);
+                if (heldFocus as Object != null)
+                {
+                    aimFocus = heldFocus;
+                    _aimLabelOverride = heldLabel;
+                }
+            }
             SetFocus(aimFocus, _aimLabelOverride);
 
             if (_held != null)
@@ -198,6 +210,10 @@ namespace CreatureExperiment.Player
             }
 
             if (!_interactAction.WasPressedThisFrame())
+                return;
+
+            // The held item's own Interact on its aim comes first; false = the usual chain below.
+            if (heldInteract != null && heldInteract.TryInteract(new Ray(aimSource.position, aimSource.forward)))
                 return;
 
             // One press, one action - the first that applies, in this order.
@@ -397,6 +413,9 @@ namespace CreatureExperiment.Player
             _placePosition = hit.point + Vector3.up * _heldPivotToBottom;
             _placeRotation = Quaternion.Euler(0f, aimSource.eulerAngles.y, 0f);
             _placeValid = PlaceSpotClear(_placePosition, hit.collider) || NudgePlaceTowardPlayer(hit);
+            // Checked on the final (possibly nudged) spot.
+            if (_placeValid && InPlaceBlockZone(_placePosition))
+                _placeValid = false;
         }
 
         /// <summary>
@@ -440,10 +459,7 @@ namespace CreatureExperiment.Player
         /// </summary>
         private bool PlaceSpotClear(Vector3 pivotPosition, Collider surface)
         {
-            float half = Mathf.Max(_heldExtents.x, _heldExtents.z);
-            Vector3 bottom = pivotPosition - Vector3.up * _heldPivotToBottom;
-            Vector3 halfExtents = new Vector3(half, Mathf.Max(_heldExtents.y - 0.01f, 0.005f), half);
-            Vector3 center = bottom + Vector3.up * (0.01f + halfExtents.y);
+            HeldFootprint(pivotPosition, out Vector3 center, out Vector3 halfExtents);
             int n = Physics.OverlapBoxNonAlloc(center, halfExtents, _overlapBuffer, Quaternion.identity, placeMask, QueryTriggerInteraction.Ignore);
             for (int i = 0; i < n; i++)
             {
@@ -453,6 +469,29 @@ namespace CreatureExperiment.Player
                 return false;
             }
             return true;
+        }
+
+        /// <summary>The held item's footprint box at <paramref name="pivotPosition"/> - shared by the clear-spot and no-place-zone tests.</summary>
+        private void HeldFootprint(Vector3 pivotPosition, out Vector3 center, out Vector3 halfExtents)
+        {
+            float half = Mathf.Max(_heldExtents.x, _heldExtents.z);
+            Vector3 bottom = pivotPosition - Vector3.up * _heldPivotToBottom;
+            halfExtents = new Vector3(half, Mathf.Max(_heldExtents.y - 0.01f, 0.005f), half);
+            center = bottom + Vector3.up * (0.01f + halfExtents.y);
+        }
+
+        /// <summary>The held item set down at <paramref name="pivotPosition"/> would overlap a <see cref="PlaceBlockZone"/> trigger.</summary>
+        private bool InPlaceBlockZone(Vector3 pivotPosition)
+        {
+            HeldFootprint(pivotPosition, out Vector3 center, out Vector3 halfExtents);
+            int n = Physics.OverlapBoxNonAlloc(center, halfExtents, _zoneBuffer, Quaternion.identity, placeMask, QueryTriggerInteraction.Collide);
+            for (int i = 0; i < n; i++)
+            {
+                Collider c = _zoneBuffer[i];
+                if (c.isTrigger && c.GetComponent<PlaceBlockZone>() != null)
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -539,10 +578,14 @@ namespace CreatureExperiment.Player
         /// </summary>
         private void Swap(Interactable target)
         {
+            // The held item would be left where the target rests - not inside a no-place zone. Nothing changes.
+            Vector3 spot = RestingSpot(target);
+            if (InPlaceBlockZone(spot + Vector3.up * _heldPivotToBottom))
+                return;
+
             if (!target.TryGrab(this))
                 return;
 
-            Vector3 spot = RestingSpot(target);
             Quaternion rot = Quaternion.Euler(0f, aimSource.eulerAngles.y, 0f);
 
             Interactable previous = _held;

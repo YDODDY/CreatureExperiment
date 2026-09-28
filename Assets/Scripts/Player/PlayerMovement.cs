@@ -56,6 +56,9 @@ namespace CreatureExperiment.Player
         /// <summary>True while the Move action (WASD) is actually being pushed this frame and this component is running. Pure input, not velocity - mouse look, jumping, being pushed or riding a door never count. Read-only seam for the corridor SensorLight; movement itself is unchanged.</summary>
         public bool HasMovementInput => isActiveAndEnabled && _moveInputSqrMagnitude > MovementInputThreshold * MovementInputThreshold;
 
+        /// <summary>The shared Input System asset this component reads (read-only - e.g. a chair reads Move to stand up while this is off).</summary>
+        public InputActionAsset InputActions => inputActions;
+
         private const float MovementInputThreshold = 0.1f;
         private float _moveInputSqrMagnitude;
 

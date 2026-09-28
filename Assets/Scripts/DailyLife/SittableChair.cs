@@ -1,20 +1,22 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using CreatureExperiment.Interaction;
 using CreatureExperiment.Player;
 
 namespace CreatureExperiment.DailyLife
 {
     /// <summary>
-    /// A chair the player sits on and gets up from with the Interact key (routed by
-    /// <c>PlayerInteractor</c> through <see cref="IUsable"/> - this component reads no input).
+    /// A chair the player sits on with the Interact key (routed by <c>PlayerInteractor</c> through
+    /// <see cref="IUsable"/>) and gets up from with the movement keys.
     ///
     /// Sitting turns off PlayerMovement and the CharacterController, moves the player so the camera sits
     /// at <see cref="sitPoint"/>, and turns the view to sitPoint's forward with <see cref="sitPitch"/> down.
-    /// Mouse look stays live. While seated the chair registers itself as the interactor's fallback use,
-    /// so Interact with nothing else aimed stands up - the player doesn't have to look back at the chair.
+    /// Mouse look stays live, and Interact stays the ordinary aimed interaction (pickup / place / use) -
+    /// it never stands up. Pushing Move (WASD) stands up; a Move key already held when sitting down must be
+    /// released first, and nothing happens while the player's controls are locked (PlayerInteractor off).
     /// Standing puts the player's feet at <see cref="standPoint"/> and turns movement back on.
     ///
-    /// Only one chair can be occupied; while seated, using any chair stands up from the current one.
+    /// Only one chair can be occupied; while seated, no chair is a World Use target (<see cref="CanUse"/>).
     /// A held item stays in hand (it rides the camera's hold anchor).
     /// </summary>
     public class SittableChair : MonoBehaviour, IUsable, IFocusTarget
@@ -31,28 +33,41 @@ namespace CreatureExperiment.DailyLife
 
         [Header("Focus label")]
         [SerializeField] private string sitPrompt = "앉기";
-        [SerializeField] private string standPrompt = "일어서기";
+        [Tooltip("Short HUD notice on sitting down - shown once per play session.")]
+        [SerializeField] private string standHint = "이동키로 일어서기";
 
         [Header("Player (found in the scene if empty)")]
         [SerializeField] private PlayerInteractor player;
 
+        private const float MoveThreshold = 0.1f;
+
         private static SittableChair s_occupied;
+        private static bool s_standHintShown;
 
         private CharacterController _controller;
         private PlayerMovement _movement;
         private PlayerLook _look;
+        private InputAction _move;
+        private bool _moveReleasedSinceSit;
 
         /// <summary>The chair the player is sitting on, or null.</summary>
         public static SittableChair Occupied => s_occupied;
         public bool IsSeated => s_occupied == this;
 
-        public string FocusName => s_occupied != null ? standPrompt : sitPrompt;
+        /// <summary>Only an empty chair while standing is a World Use target; seated, every chair is a plain surface for the aim.</summary>
+        public bool CanUse => s_occupied == null;
+
+        public string FocusName => s_occupied != null ? "" : sitPrompt;
         public Transform FocusTransform => IsSeated && seatedLabelAnchor != null ? seatedLabelAnchor : transform;
 
         public void SetFocused(bool focused) { }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetStatics() => s_occupied = null;
+        private static void ResetStatics()
+        {
+            s_occupied = null;
+            s_standHintShown = false;
+        }
 
         private void Awake()
         {
@@ -64,6 +79,23 @@ namespace CreatureExperiment.DailyLife
                 _movement = player.GetComponent<PlayerMovement>();
                 _look = player.GetComponent<PlayerLook>();
             }
+            if (_movement != null && _movement.InputActions != null)
+                _move = _movement.InputActions.FindActionMap("Player", throwIfNotFound: false)?.FindAction("Move", throwIfNotFound: false);
+        }
+
+        private void Update()
+        {
+            if (!IsSeated || _move == null)
+                return;
+            // Controls locked (dialogue): PlayerControlLock switches the interactor off.
+            if (player == null || !player.isActiveAndEnabled)
+                return;
+
+            bool pushing = _move.ReadValue<Vector2>().sqrMagnitude > MoveThreshold * MoveThreshold;
+            if (!pushing)
+                _moveReleasedSinceSit = true;
+            else if (_moveReleasedSinceSit)
+                StandUp();
         }
 
         private void OnDisable()
@@ -74,9 +106,7 @@ namespace CreatureExperiment.DailyLife
 
         public void Use()
         {
-            if (s_occupied != null)
-                s_occupied.StandUp();
-            else
+            if (s_occupied == null)
                 SitDown();
         }
 
@@ -91,6 +121,9 @@ namespace CreatureExperiment.DailyLife
 
             if (_movement != null) _movement.enabled = false;
             if (_controller != null) _controller.enabled = false;
+            // PlayerMovement's OnDisable switched Move off; read it here to stand up. Its OnEnable takes it back.
+            _move?.Enable();
+            _moveReleasedSinceSit = false;
 
             Vector3 eye = sitPoint.position;
             player.transform.position = new Vector3(eye.x, eye.y - eyeOffset, eye.z);
@@ -102,7 +135,16 @@ namespace CreatureExperiment.DailyLife
             SetChairCollider(false);
 
             s_occupied = this;
-            player.SetFallbackUse(this);
+
+            if (!s_standHintShown && !string.IsNullOrEmpty(standHint))
+            {
+                var hud = FindFirstObjectByType<ObjectiveHUD>();
+                if (hud != null)
+                {
+                    hud.ShowNotice(standHint);
+                    s_standHintShown = true;
+                }
+            }
         }
 
         private void StandUp()
@@ -115,7 +157,6 @@ namespace CreatureExperiment.DailyLife
                 if (_movement != null) _movement.enabled = true;
                 if (_look != null)
                     _look.SetLookAngles(player.transform.eulerAngles.y, 0f);
-                player.SetFallbackUse(null);
             }
             SetChairCollider(true);
             if (s_occupied == this)

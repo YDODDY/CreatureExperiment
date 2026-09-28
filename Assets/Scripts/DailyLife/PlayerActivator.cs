@@ -61,7 +61,7 @@ namespace CreatureExperiment.DailyLife
             var item = hit.collider.GetComponentInParent<Interactable>();
             if (item != null && usable is Component owner && item.transform != owner.transform && item.transform.IsChildOf(owner.transform))
                 usable = null;
-            return usable as Object != null;
+            return usable as Object != null && usable.CanUse;
         }
 
         private void Update()
