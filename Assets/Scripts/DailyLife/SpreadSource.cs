@@ -37,10 +37,12 @@ namespace CreatureExperiment.DailyLife
         /// <summary>True if a knife can still be coated from this.</summary>
         public bool HasSpread => spread != SpreadType.None && (Stock == null || !Stock.IsEmpty);
 
-        /// <summary>Use one portion for a knife. False (nothing used) when empty.</summary>
+        /// <summary>Use one portion for a knife. False (nothing used) when empty or an unpaid store product.</summary>
         public bool TryUse()
         {
             if (!HasSpread)
+                return false;
+            if (StoreProduct.RefuseUnpaidUse(this))
                 return false;
             return Stock == null || Stock.TryTake();
         }

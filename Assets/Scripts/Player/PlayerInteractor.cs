@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using CreatureExperiment.Interaction;
@@ -24,6 +25,12 @@ namespace CreatureExperiment.Player
     /// Strong Throw (Right Click, the "StrongThrow" action) is a second, separate release: a fast, flat
     /// throw at whatever the centre ray points at (see <see cref="StrongThrow"/>). F stays the soft toss.
     ///
+    /// Inventory: <see cref="slotCount"/> slots (keys 1-4 / mouse wheel pick the active one). Only the active slot's
+    /// item is "held" - in the hand, shown, and the one every rule above (E / F / Right Click / Place / receivers /
+    /// Left Click) works on. The other slots' items stay claimed on the hold anchor with colliders off and renderers
+    /// hidden. Picking something up while holding goes into a free slot (which becomes active); Swap only when all
+    /// slots are full.
+    ///
     /// Throw is a purely physical action here. It carries no "attack" / "hostile" meaning;
     /// any interpretation of what a throw means belongs to a later, separate system.
     /// </summary>
@@ -41,6 +48,10 @@ namespace CreatureExperiment.Player
         [SerializeField] private FocusLabel focusLabel;
         [Tooltip("Resolves World Use (IUsable) targets and their reach. Found on this GameObject if empty.")]
         [SerializeField] private PlayerActivator activator;
+
+        [Header("Inventory")]
+        [Tooltip("Number of inventory slots (keys Slot1..SlotN + SlotScroll in the Player action map).")]
+        [SerializeField] private int slotCount = 4;
 
         [Header("Pick up")]
         [Tooltip("Max distance to reach / focus an interactable when picking up.")]
@@ -95,6 +106,22 @@ namespace CreatureExperiment.Player
         private readonly Collider[] _overlapBuffer = new Collider[16];
         private readonly Collider[] _zoneBuffer = new Collider[32];
 
+        // A stashed (non-active) slot: its item and the shape data the hand needs, kept from when it was picked up
+        // (its colliders are off now, so it can't be measured again). The active slot lives in _held / _held* fields.
+        private struct Slot
+        {
+            public Interactable item;
+            public Collider[] colliders;
+            public float pivotToBottom;
+            public Vector3 localCenter;
+            public Vector3 extents;
+            public List<Renderer> hidden;
+        }
+        private Slot[] _slots;
+        private int _active;
+        private InputAction[] _slotActions;
+        private InputAction _slotScrollAction;
+
         // Per-frame aim resolution - what one Interact press would do right now (at most one is set).
         private IUsable _aimUsable;
         private IHeldItemReceiver _aimReceiver;
@@ -116,12 +143,35 @@ namespace CreatureExperiment.Player
         /// <summary>The item currently carried, or null. Read-only - for HUDs that describe the held item.</summary>
         public Interactable HeldItem => _held;
 
+        public int SlotCount => _slots != null ? _slots.Length : 0;
+
+        /// <summary>Index of the active slot - the one whose item is in the hand.</summary>
+        public int ActiveSlot => _active;
+
+        /// <summary>The item in slot <paramref name="index"/> (the active slot's is <see cref="HeldItem"/>), or null.</summary>
+        public Interactable GetSlotItem(int index)
+        {
+            if (_slots == null || index < 0 || index >= _slots.Length)
+                return null;
+            Interactable item = index == _active ? _held : _slots[index].item;
+            return item != null ? item : null; // a destroyed item reads as empty
+        }
+
+        /// <summary>Some slot can take one more item (the empty hand, or any empty slot).</summary>
+        public bool HasFreeSlot => FreeSlot() >= 0;
+
         private void Awake()
         {
             var playerMap = inputActions.FindActionMap("Player", throwIfNotFound: true);
             _interactAction = playerMap.FindAction("Interact", throwIfNotFound: true);
             _throwAction = playerMap.FindAction("Throw", throwIfNotFound: true);
             _strongThrowAction = playerMap.FindAction("StrongThrow", throwIfNotFound: false);
+
+            _slots = new Slot[Mathf.Max(1, slotCount)];
+            _slotActions = new InputAction[_slots.Length];
+            for (int i = 0; i < _slots.Length; i++)
+                _slotActions[i] = playerMap.FindAction($"Slot{i + 1}", throwIfNotFound: false);
+            _slotScrollAction = playerMap.FindAction("SlotScroll", throwIfNotFound: false);
 
             if (aimSource == null && Camera.main != null)
                 aimSource = Camera.main.transform;
@@ -135,6 +185,9 @@ namespace CreatureExperiment.Player
             _interactAction?.Enable();
             _throwAction?.Enable();
             _strongThrowAction?.Enable();
+            if (_slotActions != null)
+                foreach (var a in _slotActions) a?.Enable();
+            _slotScrollAction?.Enable();
         }
 
         private void OnDisable()
@@ -142,6 +195,9 @@ namespace CreatureExperiment.Player
             _interactAction?.Disable();
             _throwAction?.Disable();
             _strongThrowAction?.Disable();
+            if (_slotActions != null)
+                foreach (var a in _slotActions) a?.Disable();
+            _slotScrollAction?.Disable();
             SetFocus(null);
         }
 
@@ -160,9 +216,113 @@ namespace CreatureExperiment.Player
         /// </summary>
         public bool TryHoldNew(Interactable item)
         {
-            if (_held != null || item == null)
+            if (item == null)
                 return false;
-            return Pickup(item);
+            if (_held == null)
+                return Pickup(item);
+            return FreeSlot() >= 0 && PickupIntoFreeSlot(item);
+        }
+
+        // The active slot if the hand is empty, else the first empty other slot; -1 = all full.
+        private int FreeSlot()
+        {
+            if (_slots == null)
+                return -1;
+            if (_held == null)
+                return _active;
+            for (int i = 0; i < _slots.Length; i++)
+                if (i != _active && _slots[i].item == null)
+                    return i;
+            return -1;
+        }
+
+        private void HandleSlotInput()
+        {
+            int n = _slots.Length;
+            for (int i = 0; i < _slotActions.Length; i++)
+            {
+                if (_slotActions[i] != null && _slotActions[i].WasPressedThisFrame())
+                {
+                    SelectSlot(i);
+                    return;
+                }
+            }
+            if (_slotScrollAction != null && n > 1)
+            {
+                float y = _slotScrollAction.ReadValue<float>();
+                if (y > 0.01f) SelectSlot((_active + n - 1) % n);
+                else if (y < -0.01f) SelectSlot((_active + 1) % n);
+            }
+        }
+
+        private void SelectSlot(int index)
+        {
+            if (index == _active || index < 0 || index >= _slots.Length)
+                return;
+            StashActive();
+            _active = index;
+            RestoreActive();
+        }
+
+        // The hand's item goes into its slot: renderers off, shape data kept. The hand is empty afterwards.
+        private void StashActive()
+        {
+            ref Slot slot = ref _slots[_active];
+            slot = default;
+            if (_held != null)
+            {
+                slot.item = _held;
+                slot.colliders = _heldColliders;
+                slot.pivotToBottom = _heldPivotToBottom;
+                slot.localCenter = _heldLocalCenter;
+                slot.extents = _heldExtents;
+                slot.hidden = new List<Renderer>();
+                foreach (var r in _held.GetComponentsInChildren<Renderer>())
+                {
+                    if (!r.enabled) continue;
+                    r.enabled = false;
+                    slot.hidden.Add(r);
+                }
+            }
+            _held = null;
+            _heldColliders = null;
+        }
+
+        // The active slot's item (if any) comes back into the hand, shown again.
+        private void RestoreActive()
+        {
+            Slot slot = _slots[_active];
+            _slots[_active] = default;
+            _held = slot.item != null ? slot.item : null;
+            _heldColliders = _held != null ? slot.colliders : null;
+            if (_held == null)
+                return;
+            _heldPivotToBottom = slot.pivotToBottom;
+            _heldLocalCenter = slot.localCenter;
+            _heldExtents = slot.extents;
+            if (slot.hidden != null)
+                foreach (var r in slot.hidden)
+                    if (r != null) r.enabled = true;
+        }
+
+        // Picking up while holding: the held item is stashed, the first empty slot becomes active and takes the
+        // target. If the target can't be claimed, everything goes back as it was.
+        private bool PickupIntoFreeSlot(Interactable target)
+        {
+            int free = FreeSlot();
+            if (free < 0)
+                return false;
+            if (free == _active)
+                return Pickup(target);
+            int previous = _active;
+            StashActive();
+            _active = free;
+            RestoreActive();
+            if (Pickup(target))
+                return true;
+            _active = previous;
+            RestoreActive();
+            return false;
         }
 
         private void Update()
@@ -174,6 +334,8 @@ namespace CreatureExperiment.Player
                 SetFocus(null);
                 return;
             }
+
+            HandleSlotInput();
 
             IFocusTarget aimFocus = ResolveAim();
             if (_fallbackUse as Object != null && _aimUsable == null && _aimReceiver == null && !_aimRejected && _aimPickup == null)
@@ -225,8 +387,9 @@ namespace CreatureExperiment.Player
                 return; // consumed: a refusing receiver is still the target, so no Place fallback
             else if (_aimPickup != null)
             {
-                if (_held != null) Swap(_aimPickup);
-                else Pickup(_aimPickup);
+                if (_held == null) Pickup(_aimPickup);
+                else if (HasFreeSlot) PickupIntoFreeSlot(_aimPickup);
+                else Swap(_aimPickup); // every slot full
             }
             else if (_held != null && _placeValid)
                 Place();

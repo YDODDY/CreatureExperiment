@@ -9,8 +9,9 @@ namespace CreatureExperiment.DailyLife
     /// Trigger on the Workplace exit route. If the player walks in with the day's work done but not
     /// clocked out, and hasn't been warned yet today, the Supervisor stops them once: player control is
     /// locked (<see cref="PlayerControlLock"/>), the view turns to <see cref="lookTarget"/> over
-    /// <see cref="focusDuration"/>, <see cref="DialogueUI"/> shows the line, and Space (the "Jump" action -
-    /// dialogue advance / confirm) closes it and gives control back. E does not advance dialogue. It only warns - no clock-out, no blocking, no teleport; the player may
+    /// <see cref="focusDuration"/>, <see cref="DialogueUI"/> shows the line, and E (the "Interact" action - every
+    /// text conversation advances / confirms / closes with E; Space never does) closes it and gives control back.
+    /// It only warns - no clock-out, no blocking, no teleport; the player may
     /// still walk out. A new day (<see cref="DailyLifeDirector.DayStarted"/>) allows one warning again.
     /// </summary>
     [RequireComponent(typeof(Collider))]
@@ -24,8 +25,6 @@ namespace CreatureExperiment.DailyLife
         [Tooltip("Point on the Supervisor the player's view turns to (face / upper chest).")]
         [SerializeField] private Transform lookTarget;
         [SerializeField] private InputActionAsset inputActions;
-        [Tooltip("Action that closes the line (Space).")]
-        [SerializeField] private string advanceActionName = "Jump";
         [SerializeField] private string playerTag = "Player";
 
         [Header("Line")]
@@ -61,7 +60,7 @@ namespace CreatureExperiment.DailyLife
         private void Awake()
         {
             if (inputActions != null)
-                _advance = inputActions.FindActionMap("Player", throwIfNotFound: false)?.FindAction(advanceActionName, throwIfNotFound: false);
+                _advance = inputActions.FindActionMap("Player", throwIfNotFound: false)?.FindAction(DialogueInput.AdvanceAction, throwIfNotFound: false);
         }
 
         private void OnEnable()
@@ -117,7 +116,8 @@ namespace CreatureExperiment.DailyLife
             if (dialogue != null)
             {
                 dialogue.Show(speakerName, line);
-                // The lock switched PlayerMovement off, which also disabled the shared Jump (Space) action.
+                // The lock switched PlayerInteractor off, which also disabled the shared Interact (E) action.
+                // Jump (Space) stays off with PlayerMovement, so Space neither jumps nor closes the line.
                 _advance?.Enable();
 
                 float shownAt = Time.time;
@@ -131,7 +131,7 @@ namespace CreatureExperiment.DailyLife
                 dialogue.Hide();
             }
 
-            // Give control back a frame later so the closing Space press isn't also read as a Jump.
+            // Give control back a frame later so the closing E press isn't also read as a new Interact.
             yield return null;
             controlLock.Release();
             _running = false;

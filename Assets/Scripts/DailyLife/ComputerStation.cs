@@ -14,9 +14,11 @@ namespace CreatureExperiment.DailyLife
     /// Enter: the chair's own sitting runs (<see cref="SittableChair.SitForOwner"/> - no sit, no use), gameplay
     /// input is locked (<see cref="PlayerControlLock"/>), the held item is kept but hidden, the computer is powered
     /// on if it was off, and the Main Camera itself (not FOV) glides from the seated eye to <see cref="viewPoint"/>.
-    /// Active: cursor free; Left Click = screen click, Space = next chat line, Interact = leave. The lock switched
-    /// those shared actions off, so this enables and reads them itself - PlayerInteractor / MealEater / PlayerLook
-    /// stay off, so nothing else sees the press. Exit: cursor back, camera glides back to its seated pose, the lock
+    /// Active: cursor free; Left Click = screen click; E (<see cref="DialogueInput"/>) = on the chat page, the next line
+    /// (after the last line, back to the desktop - <see cref="ComputerScreen.AdvanceChat"/>); on any other page, leave.
+    /// Leaving is therefore always one E away from the desktop / internet page, and two from a finished chat. Space
+    /// is not read (Jump stays locked). The lock switched those shared actions off, so this enables and reads them
+    /// itself - PlayerInteractor / MealEater / PlayerLook stay off, so nothing else sees the press. Exit: cursor back, camera glides back to its seated pose, the lock
     /// is released and the chair stands the player up. Power stays as it is.
     ///
     /// Focus: aiming at the computer or at its chair lights both outlines together - one shared state here (the chair
@@ -59,7 +61,7 @@ namespace CreatureExperiment.DailyLife
         private Quaternion _camLocalRot;
         private CursorLockMode _prevCursorLock;
         private bool _prevCursorVisible;
-        private InputAction _interact, _click, _advance;
+        private InputAction _interact, _click;
         private readonly List<Renderer> _hiddenHeld = new List<Renderer>();
         private float _readyAt;
         private readonly List<Renderer> _outlines = new List<Renderer>();
@@ -88,9 +90,8 @@ namespace CreatureExperiment.DailyLife
 
             var movement = player != null ? player.GetComponent<PlayerMovement>() : null;
             var map = movement != null && movement.InputActions != null ? movement.InputActions.FindActionMap("Player", throwIfNotFound: false) : null;
-            _interact = map?.FindAction("Interact", throwIfNotFound: false);
+            _interact = map?.FindAction(DialogueInput.AdvanceAction, throwIfNotFound: false);
             _click = map?.FindAction("Attack", throwIfNotFound: false);
-            _advance = map?.FindAction("Jump", throwIfNotFound: false);
 
             if (computerOutline != null) _outlines.AddRange(computerOutline.GetComponentsInChildren<Renderer>(true));
             if (chairOutline != null) _outlines.AddRange(chairOutline.GetComponentsInChildren<Renderer>(true));
@@ -137,7 +138,6 @@ namespace CreatureExperiment.DailyLife
 
             _interact?.Enable();
             _click?.Enable();
-            _advance?.Enable();
             screen.SetInteractive(true);
             _mode = Mode.Active;
         }
@@ -152,13 +152,14 @@ namespace CreatureExperiment.DailyLife
 
             if (_interact != null && _interact.WasPressedThisFrame())
             {
+                // The chat takes E while it is open; anywhere else E leaves the computer.
+                if (screen.AdvanceChat())
+                    return;
                 StartCoroutine(Exit());
                 return;
             }
             if (_click != null && _click.WasPressedThisFrame())
                 screen.Click(_camera, pointer);
-            if (_advance != null && _advance.WasPressedThisFrame())
-                screen.Advance();
         }
 
         private IEnumerator Exit()

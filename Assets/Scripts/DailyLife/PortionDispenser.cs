@@ -6,7 +6,7 @@ namespace CreatureExperiment.DailyLife
 {
     /// <summary>
     /// "Take one out": Interact on this collider takes one unit from <see cref="stock"/> and puts a fresh copy
-    /// of <see cref="template"/> (a loose Egg / Bacon / Bread) straight into the player's empty hand.
+    /// of <see cref="template"/> (a loose Egg / Bacon / Bread) straight into the player's hand (a free inventory slot).
     ///
     /// On a movable food container (egg carton, bacon pack, bread bag) this sits on the ContentZone child - the
     /// collider over the eggs / strips / slices - while the rest of the container (tray, tab, bag end) is the
@@ -41,6 +41,8 @@ namespace CreatureExperiment.DailyLife
         [Tooltip("Shown when the held item can be put back in here with Left Click (refillable stock only).")]
         [SerializeField] private string refillPrompt = "좌클릭: 넣기";
         [SerializeField] private string fullPrompt = "가득 찼습니다";
+        [Tooltip("Shown on an unpaid store package's contents (StoreProduct.paid == false).")]
+        [SerializeField] private string unpaidPrompt = "구매 후 사용할 수 있습니다";
 
         private static PlayerInteractor s_player;
 
@@ -74,6 +76,7 @@ namespace CreatureExperiment.DailyLife
             get
             {
                 if (ClosedDoor != null) return ClosedDoor.FocusName;
+                if (StoreProduct.IsUnpaidPackage(this)) return unpaidPrompt; // a store package not paid for yet
                 // Holding something that can go back in here (egg / egg carton at the fridge egg holder): say so.
                 var held = Player != null ? Player.HeldItem : null;
                 if (Stock != null && held != null && held.TryGetComponent(out StockRefiller refiller) && refiller.AppliesTo(Stock))
@@ -82,7 +85,7 @@ namespace CreatureExperiment.DailyLife
                     return refiller.Available > 0 ? $"{refillPrompt} ({Stock.Current}/{Stock.Max})" : handsFullPrompt;
                 }
                 if (Stock == null || Stock.IsEmpty) return emptyPrompt;
-                if (held != null) return handsFullPrompt;
+                if (Player != null && !Player.HasFreeSlot) return handsFullPrompt;
                 return $"{prompt} ({Stock.Current}/{Stock.Max})";
             }
         }
@@ -126,8 +129,10 @@ namespace CreatureExperiment.DailyLife
             }
             if (template == null || Stock == null || Stock.IsEmpty)
                 return;
+            if (StoreProduct.RefuseUnpaidUse(this))
+                return; // unpaid store package: nothing is made, the count stays
             PlayerInteractor player = Player;
-            if (player != null && player.IsHolding)
+            if (player != null && !player.HasFreeSlot)
                 return;
 
             Transform at = spawnPoint != null ? spawnPoint : transform;

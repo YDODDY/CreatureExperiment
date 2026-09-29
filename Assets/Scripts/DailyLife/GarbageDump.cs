@@ -31,6 +31,9 @@ namespace CreatureExperiment.DailyLife
     /// list for the session (runtime only). Taking items back out is not built yet. With no cover (the
     /// Home kitchen TrashBin) it is always open. What may go in is the item's own
     /// <see cref="Interactable.IsDiscardable"/> - the policy hook for items that must never be thrown away.
+    /// A store product not paid for yet (<see cref="StoreProduct.IsUnpaidPackage"/>) is refused as well
+    /// ("구매 후 버릴 수 있습니다.") - checked in <see cref="CanReceive"/>, so the player never lets go of it and
+    /// nothing is destroyed or taken out of the inventory.
     /// </summary>
     public class GarbageDump : MonoBehaviour, IHeldItemReceiver
     {
@@ -44,6 +47,8 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private string discardPrompt = "버리기";
         [Tooltip("Shown while the lid is open and the held item may not be thrown away.")]
         [SerializeField] private string rejectPrompt = "버릴 수 없습니다";
+        [Tooltip("Shown while the lid is open and the held item is an unpaid store product.")]
+        [SerializeField] private string unpaidPrompt = "구매 후 버릴 수 있습니다.";
 
         [Header("Contents (runtime)")]
         [Tooltip("Everything thrown into this dump so far, oldest first.")]
@@ -73,19 +78,29 @@ namespace CreatureExperiment.DailyLife
         // --- IHeldItemReceiver
         public bool CanReceive(Interactable item)
         {
-            return IsOpen && item != null && item.IsDiscardable;
+            return IsOpen && item != null && item.IsDiscardable && !StoreProduct.IsUnpaidPackage(item);
         }
 
-        // Closed lid: no label - the body is just a closed box. Open lid + non-discardable: say why.
+        // Closed lid: no label - the body is just a closed box. Open lid + non-discardable / unpaid: say why.
         public string GetRejectPrompt(Interactable item)
         {
-            return IsOpen && item != null && !item.IsDiscardable ? rejectPrompt : null;
+            if (!IsOpen || item == null)
+                return null;
+            if (!item.IsDiscardable)
+                return rejectPrompt;
+            return StoreProduct.IsUnpaidPackage(item) ? unpaidPrompt : null;
         }
 
         public void Receive(Interactable item)
         {
             if (item == null)
                 return;
+            if (StoreProduct.IsUnpaidPackage(item))
+            {
+                // Never reached through PlayerInteractor (CanReceive refuses first); a direct caller gets no destroy.
+                Debug.LogWarning($"[GarbageDump] {name}: refused unpaid store product '{item.DisplayName}'.", this);
+                return;
+            }
 
             var record = new DiscardedItemRecord
             {

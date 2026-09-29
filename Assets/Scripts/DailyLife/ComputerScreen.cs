@@ -8,7 +8,8 @@ namespace CreatureExperiment.DailyLife
     /// <summary>
     /// The computer's power and what its monitor shows - a small fixed set of pages drawn on a World Space
     /// canvas lying on the real screen face (<see cref="screenAnchor"/>), not a browser or an OS:
-    /// Desktop (인터넷 / 채팅 icons) → Internet (one fixed test page) or Chat (fixed lines advanced with Space).
+    /// Desktop (인터넷 / 채팅 icons) → Internet (one fixed test page) or Chat (fixed lines advanced with E; E after the
+    /// last line closes the chat back to the desktop).
     ///
     /// Power is its own state, separate from "being used" (<see cref="ComputerStation"/>): off shows the monitor's
     /// own dark screen (the canvas is hidden), on shows the current page. Nothing resets it between days.
@@ -37,7 +38,7 @@ namespace CreatureExperiment.DailyLife
         [Header("Chat test (placeholder)")]
         [SerializeField] private string chatTitle = "채팅 · 테스트";
         [SerializeField] private string chatSpeaker = "상대";
-        [SerializeField] private string[] chatLines = { "안녕하세요. 테스트 메시지입니다.", "Space로 다음 줄이 나옵니다.", "테스트 대화는 여기까지입니다." };
+        [SerializeField] private string[] chatLines = { "안녕하세요. 테스트 메시지입니다.", "E로 다음 줄이 나옵니다.", "테스트 대화는 여기까지입니다." };
 
         private static readonly Color BackgroundColor = new Color(0.09f, 0.2f, 0.3f);
         private static readonly Color BarColor = new Color(0.05f, 0.07f, 0.09f);
@@ -112,16 +113,24 @@ namespace CreatureExperiment.DailyLife
             ButtonAt(cam, screenPoint)?.OnClick?.Invoke();
         }
 
-        /// <summary>Space: the next chat line (only on the chat page).</summary>
-        public void Advance()
+        /// <summary>
+        /// E on the screen: on the chat page, the next line - or, after the last line, back to the desktop. True if the
+        /// press was used here; false off the chat page (the station then leaves the computer).
+        /// </summary>
+        public bool AdvanceChat()
         {
             if (!_isOn || !_interactive || _page != Page.Chat)
-                return;
+                return false;
             if (_chatShown < chatLines.Length)
             {
                 _chatShown++;
                 RefreshChat();
             }
+            else
+            {
+                ShowPage(Page.Desktop);
+            }
+            return true;
         }
 
         private ScreenButton ButtonAt(Camera cam, Vector2 screenPoint)
@@ -159,7 +168,7 @@ namespace CreatureExperiment.DailyLife
             for (int i = 0; i < _chatShown; i++)
                 sb.Append("<b>").Append(chatSpeaker).Append("</b>  ").Append(chatLines[i]).Append("\n\n");
             _chatText.text = sb.ToString();
-            _chatHint.text = _chatShown < chatLines.Length ? "Space · 다음" : "대화 종료";
+            _chatHint.text = _chatShown < chatLines.Length ? "E · 다음" : "E · 대화 닫기";
         }
 
         // ---- Canvas construction ------------------------------------------------------------------------
@@ -183,7 +192,7 @@ namespace CreatureExperiment.DailyLife
             // Task bar with the controls, on every page.
             var bar = Panel(rt, "TaskBar", BarColor, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 56f));
             Label(bar, "Computer 0.1", 26, Color.white, TextAnchor.MiddleLeft, new Vector2(24f, 0f), Vector2.zero);
-            Label(bar, "LMB 클릭 · Space 진행 · E 종료", 26, new Color(0.8f, 0.85f, 0.9f), TextAnchor.MiddleRight, Vector2.zero, new Vector2(-24f, 0f));
+            Label(bar, "LMB 클릭 · E 진행 / 종료", 26, new Color(0.8f, 0.85f, 0.9f), TextAnchor.MiddleRight, Vector2.zero, new Vector2(-24f, 0f));
 
             var content = Panel(rt, "Pages", Color.clear, Vector2.zero, Vector2.one, new Vector2(0f, 56f), Vector2.zero);
 

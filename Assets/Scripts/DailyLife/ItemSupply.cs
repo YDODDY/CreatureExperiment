@@ -11,8 +11,8 @@ namespace CreatureExperiment.DailyLife
     /// says so - copies never spawn into each other. Same shape as the workplace <c>WorkSupply</c>, without
     /// the shift bookkeeping. A World Use (IUsable), not a pickup.
     ///
-    /// <see cref="intoHand"/> (the grocery store's shelves): the copy goes straight into the player's empty hand
-    /// instead of onto an output spot - nothing is put in the world, so nothing can block it (hands full: nothing
+    /// <see cref="intoHand"/> (the grocery store's shelves): the copy goes straight into the player's hand (a free inventory slot)
+    /// instead of onto an output spot - nothing is put in the world, so nothing can block it (inventory full: nothing
     /// happens, the label says so). What the shelf shows is separate display dressing; it never changes.
     /// </summary>
     public class ItemSupply : MonoBehaviour, IUsable, IFocusTarget
@@ -47,12 +47,15 @@ namespace CreatureExperiment.DailyLife
             }
         }
 
+        /// <summary>The (inactive) object each use copies - read by the shelf's price tag.</summary>
+        public GameObject Template => template;
+
         public string FocusName
         {
             get
             {
                 if (intoHand)
-                    return Player != null && Player.IsHolding ? handsFullPrompt : prompt;
+                    return Player != null && !Player.HasFreeSlot ? handsFullPrompt : prompt;
                 return IsBlocked() ? blockedPrompt : prompt;
             }
         }
@@ -85,7 +88,7 @@ namespace CreatureExperiment.DailyLife
         private void GiveToHand()
         {
             PlayerInteractor player = Player;
-            if (template == null || player == null || player.IsHolding)
+            if (template == null || player == null || !player.HasFreeSlot)
                 return;
 
             Transform at = outputPoint != null ? outputPoint : transform;

@@ -4,6 +4,16 @@ using TMPro;
 namespace CreatureExperiment.DailyLife
 {
     /// <summary>
+    /// The one input rule for every text conversation (DialogueUI lines, the computer chat): the Player map's
+    /// Interact (E) starts, advances, confirms a choice and closes; W / S (UI Navigate) move a choice. Space is never
+    /// read - the conversation's PlayerControlLock keeps PlayerMovement (and with it Jump) off.
+    /// </summary>
+    public static class DialogueInput
+    {
+        public const string AdvanceAction = "Interact";
+    }
+
+    /// <summary>
     /// The bottom-of-screen conversation overlay: a translucent black band with a speaker name and one
     /// line of text, shown all at once. <see cref="Show"/> / <see cref="Hide"/> only - no typing effect,
     /// choices, history or dialogue data. Whoever opens it decides when to close it.
@@ -42,6 +52,19 @@ namespace CreatureExperiment.DailyLife
             if (speakerText != null) speakerText.text = speakerName ?? "";
             if (bodyText != null) bodyText.text = text ?? "";
             if (panel != null) panel.SetActive(true);
+        }
+
+        /// <summary>
+        /// A question with options listed under it, one per line, <paramref name="selected"/> marked. Only the text -
+        /// whoever opened it reads the input and calls this again with the new selection.
+        /// </summary>
+        public void ShowChoice(string speakerName, string question, string[] options, int selected)
+        {
+            var body = new System.Text.StringBuilder(question ?? "");
+            if (options != null)
+                for (int i = 0; i < options.Length; i++)
+                    body.Append('\n').Append(i == selected ? "▶ " : "    ").Append(options[i]);
+            Show(speakerName, body.ToString());
         }
 
         public void Hide()

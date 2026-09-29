@@ -65,6 +65,8 @@ namespace CreatureExperiment.DailyLife
             var target = hit.collider.GetComponentInParent<ConsumableStock>();
             if (!AppliesTo(target))
                 return false;
+            if (StoreProduct.RefuseUnpaidUse(this))
+                return true; // an unpaid carton: aimed right, but nothing moves over until it is paid
 
             int moved = target.TryAdd(Available);
             if (moved <= 0)
