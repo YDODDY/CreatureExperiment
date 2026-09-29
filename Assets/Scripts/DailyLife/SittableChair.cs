@@ -18,6 +18,11 @@ namespace CreatureExperiment.DailyLife
     ///
     /// Only one chair can be occupied; while seated, no chair is a World Use target (<see cref="CanUse"/>).
     /// A held item stays in hand (it rides the camera's hold anchor).
+    ///
+    /// A chair with a <see cref="seatOwner"/> (the computer chair - <see cref="ComputerStation"/>) is not a chair of
+    /// its own: Interact on it, its prompt and CanUse are the owner's, and only the owner sits the player down /
+    /// stands them up (<see cref="SitForOwner"/> / <see cref="StandForOwner"/>) - Move never stands up from it.
+    /// Its focus highlight is the owner's too (<see cref="SetFocused"/> is passed on).
     /// </summary>
     public class SittableChair : MonoBehaviour, IUsable, IFocusTarget
     {
@@ -35,6 +40,10 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private string sitPrompt = "앉기";
         [Tooltip("Short HUD notice on sitting down - shown once per play session.")]
         [SerializeField] private string standHint = "이동키로 일어서기";
+
+        [Header("Owner (optional)")]
+        [Tooltip("An IUsable that owns this seat (e.g. ComputerStation). Set: Interact / prompt go to it, and only it sits and stands the player.")]
+        [SerializeField] private MonoBehaviour seatOwner;
 
         [Header("Player (found in the scene if empty)")]
         [SerializeField] private PlayerInteractor player;
@@ -55,12 +64,18 @@ namespace CreatureExperiment.DailyLife
         public bool IsSeated => s_occupied == this;
 
         /// <summary>Only an empty chair while standing is a World Use target; seated, every chair is a plain surface for the aim.</summary>
-        public bool CanUse => s_occupied == null;
+        public bool CanUse => Owner != null ? Owner.CanUse : s_occupied == null;
 
-        public string FocusName => s_occupied != null ? "" : sitPrompt;
+        public string FocusName => s_occupied != null ? "" : seatOwner is IFocusTarget ownerFocus ? ownerFocus.FocusName : sitPrompt;
+
+        private IUsable Owner => seatOwner as IUsable;
         public Transform FocusTransform => IsSeated && seatedLabelAnchor != null ? seatedLabelAnchor : transform;
 
-        public void SetFocused(bool focused) { }
+        public void SetFocused(bool focused)
+        {
+            if (seatOwner is IFocusTarget ownerFocus)
+                ownerFocus.SetFocused(focused);
+        }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
@@ -85,7 +100,7 @@ namespace CreatureExperiment.DailyLife
 
         private void Update()
         {
-            if (!IsSeated || _move == null)
+            if (!IsSeated || _move == null || seatOwner != null)
                 return;
             // Controls locked (dialogue): PlayerControlLock switches the interactor off.
             if (player == null || !player.isActiveAndEnabled)
@@ -106,8 +121,29 @@ namespace CreatureExperiment.DailyLife
 
         public void Use()
         {
+            if (Owner != null)
+            {
+                Owner.Use();
+                return;
+            }
             if (s_occupied == null)
                 SitDown();
+        }
+
+        /// <summary>For the <see cref="seatOwner"/>: sit the player down here. False if a chair is already occupied or sitting failed.</summary>
+        public bool SitForOwner()
+        {
+            if (s_occupied != null)
+                return false;
+            SitDown();
+            return IsSeated;
+        }
+
+        /// <summary>For the <see cref="seatOwner"/>: stand the player up at the stand point (no-op if not seated here).</summary>
+        public void StandForOwner()
+        {
+            if (IsSeated)
+                StandUp();
         }
 
         private void SitDown()
@@ -136,7 +172,7 @@ namespace CreatureExperiment.DailyLife
 
             s_occupied = this;
 
-            if (!s_standHintShown && !string.IsNullOrEmpty(standHint))
+            if (seatOwner == null && !s_standHintShown && !string.IsNullOrEmpty(standHint))
             {
                 var hud = FindFirstObjectByType<ObjectiveHUD>();
                 if (hud != null)
