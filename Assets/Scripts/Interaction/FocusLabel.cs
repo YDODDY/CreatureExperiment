@@ -106,13 +106,16 @@ namespace CreatureExperiment.Interaction
                 {
                     fontSize = onGuiFontSize,
                     fontStyle = FontStyle.Bold,
-                    alignment = TextAnchor.MiddleCenter,
+                    alignment = TextAnchor.UpperCenter,
                     wordWrap = false,
                 };
             }
 
             const float w = 400f;
-            Rect r = new Rect((Screen.width - w) * 0.5f, Screen.height * 0.5f + 24f, w, 28f);
+            int lines = 1;
+            foreach (char c in _name)
+                if (c == '\n') lines++;
+            Rect r = new Rect((Screen.width - w) * 0.5f, Screen.height * 0.5f + 24f, w, 26f * lines + 2f);
 
             Color prev = GUI.color;
             GUI.color = new Color(0f, 0f, 0f, 0.55f);

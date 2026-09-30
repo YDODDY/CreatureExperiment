@@ -20,13 +20,14 @@ namespace CreatureExperiment.DailyLife
         [Tooltip("The shelf supply whose product this tag prices.")]
         [SerializeField] private ItemSupply supply;
         [SerializeField] private string brand = "DAILY MART";
+        [Tooltip("Colour of the brand strip along the top (each store its own).")]
+        [SerializeField] private Color brandColor = new Color(0.78f, 0.12f, 0.12f);
         [Tooltip("Label size in metres (width, height).")]
         [SerializeField] private Vector2 size = new Vector2(0.3f, 0.13f);
         [Tooltip("Canvas units per metre - sets the text sharpness.")]
         [SerializeField] private float unitsPerMeter = 2000f;
 
         private static readonly Color PaperColor = new Color(0.97f, 0.96f, 0.9f);
-        private static readonly Color BrandBarColor = new Color(0.78f, 0.12f, 0.12f);
         private static readonly Color InkColor = new Color(0.1f, 0.1f, 0.1f);
 
         private Font _font;
@@ -56,11 +57,11 @@ namespace CreatureExperiment.DailyLife
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.worldCamera = Camera.main;
 
-            // Paper, a red brand strip along the top, the name on the left and the price large on the right.
+            // Paper, a brand-coloured strip along the top, the name on the left and the price large on the right.
             float h = rt.sizeDelta.y;
             float bar = h * 0.27f;
             Panel(rt, "Paper", PaperColor, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            var brandBar = Panel(rt, "Brand", BrandBarColor, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -bar), Vector2.zero);
+            var brandBar = Panel(rt, "Brand", brandColor, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -bar), Vector2.zero);
             Label(brandBar, brand, Mathf.RoundToInt(bar * 0.72f), Color.white, TextAnchor.MiddleLeft, FontStyle.Bold, new Vector2(12f, 0f), Vector2.zero);
 
             var body = Panel(rt, "Body", Color.clear, Vector2.zero, Vector2.one, new Vector2(14f, 6f), new Vector2(-12f, -bar));

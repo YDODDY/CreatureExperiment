@@ -20,8 +20,14 @@ namespace CreatureExperiment.DailyLife
     /// Hands full: nothing is taken and the label says so. Stock empty: nothing happens; with
     /// <see cref="hideWhenEmpty"/> (containers) this zone switches itself off, so the whole empty package is
     /// just the pickup again.
+    ///
+    /// <see cref="takeWithPrimary"/> (movable containers - cartons, packs, the bread bag, the cigarette pack): the zone is
+    /// no longer an E target of its own (<see cref="IUsable.CanUse"/> false, so its collider is simply part of the
+    /// container's body and E picks the whole container up). Taking one out is Left Click on the container
+    /// (<see cref="IAimedPrimaryAction"/>, routed by <c>MealEater</c>), and the container's focus label shows both keys
+    /// with <see cref="PrimaryHint"/>. Same take rules: unpaid refuses, empty does nothing, hands full says so.
     /// </summary>
-    public class PortionDispenser : MonoBehaviour, IUsable, IFocusTarget
+    public class PortionDispenser : MonoBehaviour, IUsable, IFocusTarget, IAimedPrimaryAction
     {
         [Tooltip("The count this takes from. Found in parents if empty.")]
         [SerializeField] private ConsumableStock stock;
@@ -34,6 +40,9 @@ namespace CreatureExperiment.DailyLife
         [Tooltip("Switch this zone's GameObject off once the stock is empty (movable containers).")]
         [SerializeField] private bool hideWhenEmpty = true;
 
+        [Tooltip("Left Click on the whole container takes one (E then only picks the container up). Off = the old E on this zone.")]
+        [SerializeField] private bool takeWithPrimary;
+
         [Header("Label")]
         [SerializeField] private string prompt = "하나 꺼내기";
         [SerializeField] private string emptyPrompt = "비어 있습니다";
@@ -44,7 +53,10 @@ namespace CreatureExperiment.DailyLife
         [Tooltip("Shown on an unpaid store package's contents (StoreProduct.paid == false).")]
         [SerializeField] private string unpaidPrompt = "구매 후 사용할 수 있습니다";
 
+        private const string InventoryFullNotice = "인벤토리가 가득 찼습니다";
+
         private static PlayerInteractor s_player;
+        private static ObjectiveHUD s_hud;
 
         private ConsumableStock Stock => stock != null ? stock : (stock = GetComponentInParent<ConsumableStock>());
 
@@ -92,6 +104,48 @@ namespace CreatureExperiment.DailyLife
 
         public Transform FocusTransform => transform;
 
+        /// <summary>Not an E target of its own in Left Click mode - E goes to the container's pickup.</summary>
+        public bool CanUse => !takeWithPrimary;
+
+        // --- IAimedPrimaryAction (Left Click on the container)
+        public bool PrimaryEnabled => takeWithPrimary;
+
+        public string PrimaryHint
+        {
+            get
+            {
+                if (StoreProduct.IsUnpaidPackage(this)) return $"LMB {unpaidPrompt}";
+                if (Stock == null || Stock.IsEmpty) return "LMB 비어 있음";
+                if (Player != null && !Player.HasFreeSlot) return $"LMB {InventoryFullNotice}";
+                return $"LMB {prompt} ({Stock.Current}/{Stock.Max})";
+            }
+        }
+
+        public bool TryAimedPrimary()
+        {
+            if (!takeWithPrimary)
+                return false;
+            if (Stock == null || Stock.IsEmpty)
+                return true; // nothing inside: the press is spent on the container, nothing happens
+            if (StoreProduct.RefuseUnpaidUse(this))
+                return true;
+            if (Player != null && !Player.HasFreeSlot)
+            {
+                Notice(InventoryFullNotice);
+                return true;
+            }
+            TakeOne();
+            return true;
+        }
+
+        private static void Notice(string text)
+        {
+            if (s_hud == null)
+                s_hud = FindFirstObjectByType<ObjectiveHUD>();
+            if (s_hud != null)
+                s_hud.ShowNotice(text);
+        }
+
         public void SetFocused(bool focused)
         {
             if (outlineRenderer != null)
@@ -131,10 +185,17 @@ namespace CreatureExperiment.DailyLife
                 return;
             if (StoreProduct.RefuseUnpaidUse(this))
                 return; // unpaid store package: nothing is made, the count stays
-            PlayerInteractor player = Player;
-            if (player != null && !player.HasFreeSlot)
+            if (Player != null && !Player.HasFreeSlot)
                 return;
+            TakeOne();
+        }
 
+        // One unit out of the stock and into the player's hand (checks already done by the caller).
+        private void TakeOne()
+        {
+            if (template == null || Stock == null || Stock.IsEmpty)
+                return;
+            PlayerInteractor player = Player;
             Transform at = spawnPoint != null ? spawnPoint : transform;
             GameObject made = Instantiate(template, at.position + Vector3.up * 0.05f, Quaternion.Euler(0f, at.eulerAngles.y, 0f));
             made.name = template.name.Replace("_Template", "");

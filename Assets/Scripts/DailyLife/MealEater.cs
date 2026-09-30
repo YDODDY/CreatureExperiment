@@ -15,6 +15,8 @@ namespace CreatureExperiment.DailyLife
     /// 2. Otherwise (or if that action reports it had nothing to do) a held edible food / meal plate is eaten.
     /// 3. Hands empty, aiming at edible food / a meal plate within <see cref="reach"/>: eat it. Food served
     ///    on a plate is eaten with its plate.
+    /// Before 2 / 3: aiming at a container lying in the world (egg carton, bacon pack, bread bag, cigarette pack -
+    /// <see cref="IAimedPrimaryAction"/>) takes one of its contents into a free slot.
     /// Anything else: nothing. Interact (E) stays the plain world interaction (pickup / place / use).
     /// </summary>
     public class MealEater : MonoBehaviour
@@ -91,13 +93,30 @@ namespace CreatureExperiment.DailyLife
                     }
                     return;
                 }
-                // No action, or it had nothing to do (an egg not aimed at egg storage): eat it if it is edible.
+                // No action, or it had nothing to do: a container aimed at in the world gives one of its contents,
+                // otherwise eat what is in the hand if it is edible.
+                if (TryTakeFromAimedContainer(ray))
+                    return;
                 TryEat(held, fromHand: true); // the interactor's held reference becomes null once the object is destroyed
                 return;
             }
 
+            if (TryTakeFromAimedContainer(ray))
+                return;
             if (Physics.Raycast(ray, out RaycastHit hit, reach, ~0, QueryTriggerInteraction.Ignore))
                 TryEat(hit.collider.GetComponentInParent<Interactable>(), fromHand: false);
+        }
+
+        // Left Click on a container lying in the world (egg carton, pack): take one of its contents (IAimedPrimaryAction).
+        private bool TryTakeFromAimedContainer(Ray ray)
+        {
+            if (!Physics.Raycast(ray, out RaycastHit hit, reach, ~0, QueryTriggerInteraction.Ignore))
+                return false;
+            var item = hit.collider.GetComponentInParent<Interactable>();
+            if (item == null || item.IsHeld)
+                return false;
+            IAimedPrimaryAction take = AimedPrimary.Find(item);
+            return take != null && take.TryAimedPrimary();
         }
 
         private void CancelActive()

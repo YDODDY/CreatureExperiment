@@ -14,6 +14,12 @@ namespace CreatureExperiment.DailyLife
     /// <see cref="intoHand"/> (the grocery store's shelves): the copy goes straight into the player's hand (a free inventory slot)
     /// instead of onto an output spot - nothing is put in the world, so nothing can block it (inventory full: nothing
     /// happens, the label says so). What the shelf shows is separate display dressing; it never changes.
+    ///
+    /// <see cref="price"/> (vending machines): each copy costs this much from the <see cref="PlayerWallet"/>. The press first
+    /// checks that the copy can be made (tray free), then takes the money, then makes it - nothing is charged for a copy
+    /// that isn't made; not enough money: nothing is made or taken ("돈이 부족합니다."). The machine's sign
+    /// (<see cref="priceLabel"/>) is written from this price, so the sign and the charge can't disagree. Store shelves
+    /// (<see cref="intoHand"/>) never charge here - stores are paid at the checkout (<see cref="StoreProduct"/>).
     /// </summary>
     public class ItemSupply : MonoBehaviour, IUsable, IFocusTarget
     {
@@ -21,6 +27,8 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private GameObject template;
         [Tooltip("Where the new item's pivot appears (the copy keeps the template's pivot).")]
         [SerializeField] private Transform outputPoint;
+        [Tooltip("Extra height (m, world up) above the output point for the copy - room for a bigger item without moving the machine's point.")]
+        [SerializeField] private float outputLift;
         [Tooltip("Optional parent for the copies.")]
         [SerializeField] private Transform spawnParent;
         [Tooltip("Optional shared output tray (vending machine). When set, the supply is blocked only while a loose pick-up-able item (an Interactable nobody holds) overlaps this box - so every button sharing the tray gives the same answer. Box = this Transform's position / rotation / lossyScale.")]
@@ -35,7 +43,17 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private bool intoHand;
         [SerializeField] private string handsFullPrompt = "손을 비우세요";
 
+        [Header("Price (vending machine)")]
+        [Tooltip("US cents taken from the PlayerWallet per copy ($1.50 = 150). 0 = free. Ignored with intoHand (stores charge at the checkout).")]
+        [SerializeField] private int price;
+        [Tooltip("Optional sign showing name + price; rewritten from price at start.")]
+        [SerializeField] private TextMesh priceLabel;
+        [Tooltip("First line of the price sign (the drink's name).")]
+        [SerializeField] private string priceLabelName;
+        [SerializeField] private string notEnoughMoneyNotice = "돈이 부족합니다.";
+
         private static PlayerInteractor s_player;
+        private static ObjectiveHUD s_hud;
 
         private static PlayerInteractor Player
         {
@@ -50,13 +68,20 @@ namespace CreatureExperiment.DailyLife
         /// <summary>The (inactive) object each use copies - read by the shelf's price tag.</summary>
         public GameObject Template => template;
 
+        /// <summary>Vending price in US cents (0 = free).</summary>
+        public int Price => price;
+
+        private bool Charges => price > 0 && !intoHand;
+
         public string FocusName
         {
             get
             {
                 if (intoHand)
                     return Player != null && !Player.HasFreeSlot ? handsFullPrompt : prompt;
-                return IsBlocked() ? blockedPrompt : prompt;
+                if (IsBlocked())
+                    return blockedPrompt;
+                return Charges ? $"{prompt} · {PlayerWallet.FormatUsd(price)}" : prompt;
             }
         }
         public Transform FocusTransform => transform;
@@ -67,6 +92,8 @@ namespace CreatureExperiment.DailyLife
         {
             if (template != null)
                 template.SetActive(false);
+            if (priceLabel != null && Charges)
+                priceLabel.text = $"{priceLabelName}\n{PlayerWallet.FormatUsd(price)}";
         }
 
         public void Use()
@@ -78,11 +105,29 @@ namespace CreatureExperiment.DailyLife
             }
             if (template == null || IsBlocked())
                 return;
+            if (!TryCharge())
+                return; // not enough money: nothing made, nothing taken
 
             Transform at = outputPoint != null ? outputPoint : transform;
-            GameObject made = Instantiate(template, at.position, at.rotation, spawnParent);
+            GameObject made = Instantiate(template, at.position + Vector3.up * outputLift, at.rotation, spawnParent);
             made.name = template.name.Replace("_Template", "");
             made.SetActive(true);
+        }
+
+        // Only after the copy is known to fit (tray free): the money goes, then the copy is made in the same call.
+        private bool TryCharge()
+        {
+            if (!Charges)
+                return true;
+            PlayerInteractor player = Player;
+            var wallet = player != null ? player.GetComponent<PlayerWallet>() : null;
+            if (wallet != null && wallet.TrySpend(price))
+                return true;
+            if (s_hud == null)
+                s_hud = FindFirstObjectByType<ObjectiveHUD>();
+            if (s_hud != null)
+                s_hud.ShowNotice(notEnoughMoneyNotice);
+            return false;
         }
 
         private void GiveToHand()

@@ -338,6 +338,7 @@ namespace CreatureExperiment.Player
             HandleSlotInput();
 
             IFocusTarget aimFocus = ResolveAim();
+            AddContainerHint();
             if (_fallbackUse as Object != null && _aimUsable == null && _aimReceiver == null && !_aimRejected && _aimPickup == null)
             {
                 _aimUsable = _fallbackUse;
@@ -473,6 +474,21 @@ namespace CreatureExperiment.Player
             if (_held == null && item == null && !(focus is IHeldItemReceiver))
                 return focus;
             return null;
+        }
+
+        // A container lying in the world (egg carton, pack): one focus, two keys. The label shows the E pickup and, when
+        // a Left Click would reach it (empty hand, or a held item with no Left Click of its own), taking one out.
+        private void AddContainerHint()
+        {
+            if (_aimPickup == null || _aimLabelOverride != null)
+                return;
+            IAimedPrimaryAction take = AimedPrimary.Find(_aimPickup);
+            if (take == null)
+                return;
+            bool primaryReaches = _held == null || _held.GetComponent<IHeldPrimaryAction>() == null;
+            _aimLabelOverride = primaryReaches
+                ? $"{_aimPickup.DisplayName}\nE 들기\n{take.PrimaryHint}"
+                : $"{_aimPickup.DisplayName}\nE 들기";
         }
 
         private static bool InMask(LayerMask mask, int layer) => (mask.value & (1 << layer)) != 0;

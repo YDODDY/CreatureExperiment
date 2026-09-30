@@ -249,7 +249,7 @@ namespace CreatureExperiment.DailyLife
             return lastShiftResult;
         }
 
-        /// <summary>Attendance, at scene start and on every new day: box closed, everything made today gone, counts zeroed.</summary>
+        /// <summary>Attendance, at scene start and on every new day: box closed, everything made today gone, counts zeroed, supplies (tape) topped up.</summary>
         public void ResetDay()
         {
             if (shiftActive && !shiftEnded)
@@ -267,6 +267,8 @@ namespace CreatureExperiment.DailyLife
 
             if (runtimeStickers != null)
                 runtimeStickers.Clear();
+
+            WorkplaceItemRestock.EnsureAll(); // workplace-provided items (the tape roll): back up to one on hand
 
             shiftActive = false;
             shiftEnded = false;

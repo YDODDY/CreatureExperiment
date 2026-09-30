@@ -61,6 +61,8 @@ namespace CreatureExperiment.DailyLife
         /// <summary>Left Click while held (<see cref="IHeldPrimaryAction"/>): <see cref="Use"/> on what the centre ray hits within reach.</summary>
         public bool PrimaryPress(Ray aim)
         {
+            if (StoreProduct.RefuseUnpaidUse(this))
+                return true; // a store knife not paid for yet (the home knife has no StoreProduct)
             if (Physics.Raycast(aim, out RaycastHit hit, primaryReach, ~0, QueryTriggerInteraction.Ignore))
                 Use(hit.collider);
             return true;
