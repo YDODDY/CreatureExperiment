@@ -7,107 +7,140 @@ using CreatureExperiment.Story;
 namespace CreatureExperiment.StoryEditor
 {
     /// <summary>
-    /// Builds the Day 1 story objects into the open DailyLife scene, as one "Story" root:
-    /// Day1StoryController, Mike (primitive story NPC + smoking presentation, waiting on the sidewalk where the Villa's south
-    /// path meets it), his routes (commute, lunch into the General Mart's beer corner, out of it, back to work, to the smoking
-    /// area, out of the scene) and the
-    /// story zones (Workplace inside, 2F work area, General Mart inside / outside, smoking area, home entry).
-    /// Re-running replaces the previous "Story" root only. Nothing else in the scene is moved; existing objects are only
-    /// referenced (doors, the mart's exit gate, the store cigarette templates).
-    /// Positions come from the live scene survey; move the objects in the scene to tune them (a rebuild resets them).
+    /// Builds the Day 1 story objects into the open DailyLife scene (District Blockout v0.2 layout), as one "Story" root:
+    /// Day1StoryController, Mike (primitive story NPC + smoking presentation), his routes (commute, lunch into the Convenience
+    /// Store's beer corner, out of it, back to work, to the smoking area, out of the scene) and the story zones (Workplace
+    /// inside, 2F work area, Convenience Store inside / outside, smoking area, home entry).
+    ///
+    /// Points inside / at a building are given in that building's original (v0.1) frame and placed through its current root
+    /// transform (<see cref="AtWorkplace"/>, <see cref="AtStore"/>, <see cref="AtVilla"/>), so they follow the building
+    /// wherever it stands. Outdoor points (sidewalks, crosswalks, alleys) are District v0.2 world coordinates.
+    /// Re-running replaces the previous "Story" root only; existing objects are only referenced (doors, the store's exit gate,
+    /// the store cigarette templates).
     /// </summary>
     public static class Day1StoryBuilder
     {
         private const string RootName = "Story";
+        private const string WorkplacePath = "Street/Workplace";
         private const string FrontDoorPath = "Street/Workplace/Workplace_Interior/Shell/Door_WorkplaceFront_Hinge";
         private const string BackDoorPath = "Street/Workplace/Workplace_Interior/Shell/Door_WorkplaceBack_Hinge";
-        private const string MartPath = "Street/StoreShells/GeneralMart";
+        private const string StorePath = "Street/StoreShells/ConvenienceStore";
+        private const string StoreDoorPath = "Street/StoreShells/ConvenienceStore/Door_ConvenienceStore_Hinge";
+        private const string VillaPath = "Villa";
+        private const float Ground = -3.5f;
+
+        // Original (v0.1) poses of the roots the interior points were measured in.
+        private static readonly Vector3 WorkplaceOriginalRootPos = new Vector3(0f, 0f, -45f);
+
+        private static readonly Vector3 MikeStartPos = new Vector3(-55.2f, Ground, 7.6f);
+        private const float MikeStartYaw = 340f;
+
+        private static Transform s_workplace, s_store, s_villa;
 
         [MenuItem("Tools/CreatureExperiment/Build Day 1 Story")]
         public static void Build()
         {
+            s_workplace = GameObject.Find(WorkplacePath)?.transform;
+            s_store = GameObject.Find(StorePath)?.transform;
+            s_villa = GameObject.Find(VillaPath)?.transform;
+            if (s_workplace == null || s_store == null || s_villa == null)
+            {
+                Debug.LogError("[Day1StoryBuilder] Workplace / ConvenienceStore / Villa root not found - run the District v0.2 move first.");
+                return;
+            }
+
             var old = GameObject.Find(RootName);
             if (old != null)
                 Undo.DestroyObjectImmediate(old);
-
             var root = new GameObject(RootName);
             Undo.RegisterCreatedObjectUndo(root, "Build Day 1 Story");
 
             SwingDoor frontDoor = Door(FrontDoorPath);
             SwingDoor backDoor = Door(BackDoorPath);
-            var mart = GameObject.Find(MartPath);
-            Transform templates = mart != null ? mart.transform.Find("ProductTemplates") : null;
+            SwingDoor storeDoor = Door(StoreDoorPath);
+            Transform templates = s_store.Find("ProductTemplates");
             Transform cigT = templates != null ? templates.Find("Cigarette_Template") : null;
             Transform packT = templates != null ? templates.Find("CigarettePack_Template") : null;
-            StoreExitGate martGate = mart != null ? mart.GetComponentInChildren<StoreExitGate>(true) : null;
-            SwingDoor martDoor = mart != null ? mart.transform.Find("Door_GenericShop_Hinge")?.GetComponent<SwingDoor>() : null;
-            if (cigT == null || packT == null || martGate == null)
-                Debug.LogWarning("[Day1StoryBuilder] General Mart cigarette templates / exit gate not found.");
+            StoreExitGate storeGate = s_store.GetComponentInChildren<StoreExitGate>(true);
+            if (cigT == null || packT == null || storeGate == null)
+                Debug.LogWarning("[Day1StoryBuilder] Convenience Store cigarette templates / exit gate not found.");
 
             // ---- Routes
+            // Morning: from the meeting point on Main Street's north sidewalk, east, across Main Street on the V2 west
+            // crosswalk, along the south sidewalk to the Workplace front, in through the front door to Mike's 1F spot.
             var commute = Child(root.transform, "MikeRoute_Day1Commute", Vector3.zero, 0f);
-            Waypoint(commute, "WP00_SidewalkStart", new Vector3(18.2f, -3.5f, -16.5f), 180f);
-            Waypoint(commute, "WP01_SidewalkWorkplace", new Vector3(18.2f, -3.5f, -124.6f), 180f);
-            Waypoint(commute, "WP02_Apron", new Vector3(15.0f, -3.5f, -126.0f), 270f);
-            Waypoint(commute, "WP03_FrontDoorOutside", new Vector3(13.9f, -3.5f, -126.0f), 270f).openDoor = frontDoor;
-            Waypoint(commute, "WP04_FrontDoorInside", new Vector3(11.8f, -3.5f, -126.0f), 270f);
-            Waypoint(commute, "WP05_Hall", new Vector3(10.4f, -3.5f, -126.6f), 270f).closeDoor = frontDoor;
-            Waypoint(commute, "WP06_MikeSpot", new Vector3(7.2f, -3.5f, -127.6f), 90f); // faces the front door
+            Waypoint(commute, "C00_MainNorthSidewalk", new Vector3(-30f, Ground, 7f), 90f);
+            Waypoint(commute, "C01_CrosswalkNorth", new Vector3(30.5f, Ground, 7f), 180f);
+            Waypoint(commute, "C02_CrosswalkSouth", new Vector3(30.5f, Ground, -7f), 90f);
+            Waypoint(commute, "C03_MainSouthSidewalk_Workplace", new Vector3(73f, Ground, -7f), 180f);
+            Waypoint(commute, "C04_Workplace_Apron", AtWorkplace(15.0f, -126.0f), WorkplaceYaw(270f));
+            Waypoint(commute, "C05_FrontDoorOutside", AtWorkplace(13.9f, -126.0f), WorkplaceYaw(270f)).openDoor = frontDoor;
+            Waypoint(commute, "C06_FrontDoorInside", AtWorkplace(11.8f, -126.0f), WorkplaceYaw(270f));
+            Waypoint(commute, "C07_Hall", AtWorkplace(10.4f, -126.6f), WorkplaceYaw(270f)).closeDoor = frontDoor;
+            Waypoint(commute, "C08_MikeSpot", AtWorkplace(7.2f, -127.6f), WorkplaceYaw(90f)); // faces the front door
 
+            // Lunch: out the front door, west along the frontage, into the Convenience Store, to the beer corner.
             var lunch = Child(root.transform, "MikeRoute_Day1Lunch", Vector3.zero, 0f);
-            Waypoint(lunch, "L00_HallByDoor", new Vector3(10.6f, -3.5f, -126.6f), 90f).openDoor = frontDoor;
-            Waypoint(lunch, "L01_FrontDoorInside", new Vector3(12.2f, -3.5f, -126.0f), 90f);
-            Waypoint(lunch, "L02_FrontDoorOutside", new Vector3(14.6f, -3.5f, -126.0f), 90f).closeDoor = frontDoor;
-            Waypoint(lunch, "L03_Sidewalk", new Vector3(18.2f, -3.5f, -124.6f), 0f);
-            Waypoint(lunch, "L04_SidewalkCrosswalk", new Vector3(18.4f, -3.5f, -36.25f), 90f);
-            Waypoint(lunch, "L05_OppositeSidewalk", new Vector3(27.8f, -3.5f, -36.25f), 0f);
-            Waypoint(lunch, "L06_MartDoorOutside", new Vector3(29.4f, -3.5f, -28.0f), 90f).openDoor = martDoor;
-            Waypoint(lunch, "L07_MartDoorInside", new Vector3(31.6f, -3.5f, -28.3f), 90f);
-            // Beer corner, against the west wall: looking at the beer, 2.4 m off the shelves, clear of the door / checkout path.
-            Waypoint(lunch, "L08_MartBeerCorner", new Vector3(31.0f, -3.5f, -30.6f), 180f);
+            Waypoint(lunch, "L00_HallByDoor", AtWorkplace(10.6f, -126.6f), WorkplaceYaw(90f)).openDoor = frontDoor;
+            Waypoint(lunch, "L01_FrontDoorInside", AtWorkplace(12.2f, -126.0f), WorkplaceYaw(90f));
+            Waypoint(lunch, "L02_FrontDoorOutside", AtWorkplace(14.6f, -126.0f), WorkplaceYaw(90f)).closeDoor = frontDoor;
+            Waypoint(lunch, "L03_Frontage_Workplace", new Vector3(73f, Ground, -15f), 270f);
+            Waypoint(lunch, "L04_Frontage_Store", new Vector3(52f, Ground, -15f), 180f);
+            Waypoint(lunch, "L05_StoreDoorOutside", AtStore(29.4f, -28.0f), StoreYaw(90f)).openDoor = storeDoor;
+            Waypoint(lunch, "L06_StoreDoorInside", AtStore(31.6f, -28.3f), StoreYaw(90f));
+            // Beer corner: against the wall, looking at the beer shelf, clear of the door / checkout path.
+            Waypoint(lunch, "L07_StoreBeerCorner", AtStore(31.0f, -30.6f), StoreYaw(180f));
 
-            var martExit = Child(root.transform, "MikeRoute_Day1MartExit", Vector3.zero, 0f);
-            Waypoint(martExit, "X00_InsideByDoor", new Vector3(32.4f, -3.5f, -28.6f), 270f).openDoor = martDoor; // outside the leaf's swing
-            Waypoint(martExit, "X01_MartDoorInside", new Vector3(31.4f, -3.5f, -28.2f), 270f);
-            Waypoint(martExit, "X02_MartDoorOutside", new Vector3(29.4f, -3.5f, -28.0f), 270f);
-            Waypoint(martExit, "X03_OutsideSpot", new Vector3(28.4f, -3.5f, -30.0f), 47f); // by the door, facing it
+            var storeExit = Child(root.transform, "MikeRoute_Day1StoreExit", Vector3.zero, 0f);
+            Waypoint(storeExit, "X00_InsideByDoor", AtStore(32.4f, -28.6f), StoreYaw(270f)).openDoor = storeDoor; // outside the leaf's swing
+            Waypoint(storeExit, "X01_StoreDoorInside", AtStore(31.4f, -28.2f), StoreYaw(270f));
+            Waypoint(storeExit, "X02_StoreDoorOutside", AtStore(29.4f, -28.0f), StoreYaw(270f));
+            Waypoint(storeExit, "X03_OutsideSpot", new Vector3(50.5f, Ground, -16.2f), 160f); // by the door, facing it
 
             var back = Child(root.transform, "MikeRoute_Day1ReturnToWork", Vector3.zero, 0f);
-            Waypoint(back, "R00_OppositeSidewalk", new Vector3(27.8f, -3.5f, -36.25f), 270f);
-            Waypoint(back, "R01_SidewalkCrosswalk", new Vector3(18.4f, -3.5f, -36.25f), 180f);
-            Waypoint(back, "R02_Sidewalk", new Vector3(18.2f, -3.5f, -40.0f), 180f);
-            Waypoint(back, "R03_SidewalkWorkplace", new Vector3(18.2f, -3.5f, -124.6f), 180f);
-            Waypoint(back, "R04_Apron", new Vector3(15.0f, -3.5f, -126.0f), 270f);
-            Waypoint(back, "R05_FrontDoorOutside", new Vector3(13.9f, -3.5f, -126.0f), 270f).openDoor = frontDoor;
-            Waypoint(back, "R06_FrontDoorInside", new Vector3(11.8f, -3.5f, -126.0f), 270f);
-            Waypoint(back, "R07_Hall", new Vector3(10.4f, -3.5f, -126.6f), 270f).closeDoor = frontDoor;
-            Waypoint(back, "R08_MikeSpot", new Vector3(7.2f, -3.5f, -127.6f), 90f);
+            Waypoint(back, "R00_Frontage_Store", new Vector3(52f, Ground, -15f), 90f);
+            Waypoint(back, "R01_Frontage_Workplace", new Vector3(73f, Ground, -15f), 180f);
+            Waypoint(back, "R02_FrontDoorOutside", AtWorkplace(13.9f, -126.0f), WorkplaceYaw(270f)).openDoor = frontDoor;
+            Waypoint(back, "R03_FrontDoorInside", AtWorkplace(11.8f, -126.0f), WorkplaceYaw(270f));
+            Waypoint(back, "R04_Hall", AtWorkplace(10.4f, -126.6f), WorkplaceYaw(270f)).closeDoor = frontDoor;
+            Waypoint(back, "R05_MikeSpot", AtWorkplace(7.2f, -127.6f), WorkplaceYaw(90f));
 
+            // After work: through the hall to the Back Entrance (Delivery Alley side) and the smoking area behind it.
             var smoke = Child(root.transform, "MikeRoute_Day1Smoking", Vector3.zero, 0f);
-            Waypoint(smoke, "S00_HallByBackDoor", new Vector3(-1.2f, -3.5f, -129.5f), 270f).openDoor = backDoor;
-            Waypoint(smoke, "S01_BackDoorInside", new Vector3(-3.0f, -3.5f, -129.5f), 270f);
-            Waypoint(smoke, "S02_BackDoorOutside", new Vector3(-5.0f, -3.5f, -129.5f), 270f).closeDoor = backDoor;
-            Waypoint(smoke, "S03_SmokingLink", new Vector3(-5.7f, -3.5f, -131.0f), 180f);
-            Waypoint(smoke, "S04_SmokingSpot", new Vector3(-6.0f, -3.5f, -132.6f), 60f); // by the ashtray, facing the way in
+            Waypoint(smoke, "S00_HallByBackDoor", AtWorkplace(-1.2f, -129.5f), WorkplaceYaw(270f)).openDoor = backDoor;
+            Waypoint(smoke, "S01_BackDoorInside", AtWorkplace(-3.0f, -129.5f), WorkplaceYaw(270f));
+            Waypoint(smoke, "S02_BackDoorOutside", AtWorkplace(-5.0f, -129.5f), WorkplaceYaw(270f)).closeDoor = backDoor;
+            Waypoint(smoke, "S03_SmokingLink", AtWorkplace(-5.7f, -131.0f), WorkplaceYaw(180f));
+            Waypoint(smoke, "S04_SmokingSpot", AtWorkplace(-6.0f, -132.6f), WorkplaceYaw(60f)); // by the ashtray, facing the way in
 
+            // Mike goes home: down to the Delivery Alley, east, then south on the service loop - away from the Villa (north-west).
             var exit = Child(root.transform, "MikeRoute_Day1GoHome", Vector3.zero, 0f);
-            Waypoint(exit, "E00_BehindWorkplace", new Vector3(-6.0f, -3.5f, -138.6f), 180f);
-            Waypoint(exit, "E01_SouthStrip", new Vector3(16.0f, -3.5f, -138.6f), 90f);
-            Waypoint(exit, "E02_Sidewalk", new Vector3(18.2f, -3.5f, -141.0f), 180f);
-            Waypoint(exit, "E03_SidewalkSouth", new Vector3(18.2f, -3.5f, -190.0f), 180f); // away from the Villa (north)
+            Waypoint(exit, "E00_DeliveryAlley", new Vector3(81f, Ground, -48f), 180f);
+            Waypoint(exit, "E01_DeliveryAlley_East", new Vector3(95f, Ground, -48f), 90f);
+            Waypoint(exit, "E02_ServiceLoop_South", new Vector3(95f, Ground, -95f), 180f);
 
-            // ---- Mike
-            var mike = BuildMike(root.transform, new Vector3(17.9f, -3.5f, -14.6f), 270f, commute,
-                cigT != null ? cigT.gameObject : null, out StoryNpcSmoking smoking);
+            // ---- Mike: where the Villa's way out meets Main Street's north sidewalk (not at the Villa door).
+            // Mike waits at the V1 x Main Street corner (NE sidewalk, by the X -58.7 crosswalk's traffic light): straight
+            // ahead of the player coming down the Villa's west stair along V1, facing back up the street towards them.
+            var mike = BuildMike(root.transform, MikeStartPos, MikeStartYaw, commute, cigT != null ? cigT.gameObject : null, out StoryNpcSmoking smoking);
 
             // ---- Zones
             var zones = Child(root.transform, "Zones", Vector3.zero, 0f);
-            var workplace = Zone(zones, "Zone_WorkplaceInside", new Vector3(9.75f, -2.5f, -127.7f), new Vector3(2.5f, 2.2f, 5.2f));
-            var workArea = Zone(zones, "Zone_WorkAreaInside", new Vector3(5.3f, 1.0f, -118.7f), new Vector3(3.4f, 2.2f, 5.0f));
-            var martIn = Zone(zones, "Zone_MartInside", new Vector3(35.0f, -2.5f, -28.0f), new Vector3(5.2f, 2.2f, 10.6f));
-            var martOut = Zone(zones, "Zone_MartOutside", new Vector3(28.6f, -2.5f, -28.0f), new Vector3(3.2f, 2.2f, 5.0f));
-            var smokingArea = Zone(zones, "Zone_SmokingArea", new Vector3(-5.75f, -2.5f, -132.4f), new Vector3(3.6f, 2.2f, 5.4f));
-            var home = Zone(zones, "Zone_HomeInside", new Vector3(1.0f, 1.0f, -0.95f), new Vector3(1.4f, 2.2f, 1.6f));
+            var workplace = Zone(zones, "Zone_WorkplaceInside", AtWorkplace(9.75f, -127.7f, -2.5f), new Vector3(2.5f, 2.2f, 5.2f), s_workplace.eulerAngles.y);
+            var workArea = Zone(zones, "Zone_WorkAreaInside", AtWorkplace(5.3f, -118.7f, 1.0f), new Vector3(3.4f, 2.2f, 5.0f), s_workplace.eulerAngles.y);
+            var storeIn = Zone(zones, "Zone_ConvenienceStoreInside", AtStore(35.0f, -28.0f, -2.5f), new Vector3(5.2f, 2.2f, 10.6f), s_store.eulerAngles.y);
+            var storeOut = Zone(zones, "Zone_ConvenienceStoreOutside", new Vector3(52f, -2.5f, -16.8f), new Vector3(6.0f, 2.2f, 4.4f), 0f);
+            var smokingArea = Zone(zones, "Zone_SmokingArea", AtWorkplace(-5.75f, -132.4f, -2.5f), new Vector3(3.6f, 2.2f, 5.4f), s_workplace.eulerAngles.y);
+            var home = Zone(zones, "Zone_HomeInside", AtVilla(1.0f, -0.95f, 1.0f), new Vector3(1.4f, 2.2f, 1.6f), s_villa.eulerAngles.y);
+            // Narration zones: arrival (above) only records "got here"; the narration waits until the player is ~3-4 steps
+            // further in. Work area: from 2.3 m past the Work Door (door at x 2.3) over the work floor. Home: the whole
+            // living / dining / kitchen room minus a ~2.4 m buffer strip inside the front door (door at x 1.77).
+            var workAreaNarration = Zone(zones, "Zone_WorkAreaNarration", AtWorkplace(8.75f, -122.65f, 1.0f), new Vector3(8.3f, 2.2f, 14.7f), s_workplace.eulerAngles.y);
+            var homeNarration = Zone(zones, "Zone_HomeNarration", AtVilla(-1.625f, 1.675f, 1.0f), new Vector3(6.75f, 2.2f, 10.05f), s_villa.eulerAngles.y);
+            var homeEntryBuffer = Zone(zones, "Zone_HomeEntryBuffer", AtVilla(0.75f, -1.05f, 1.0f), new Vector3(2.7f, 2.2f, 4.7f), s_villa.eulerAngles.y);
+            var hso = new SerializedObject(homeNarration);
+            hso.FindProperty("exclude").objectReferenceValue = homeEntryBuffer;
+            hso.ApplyModifiedPropertiesWithoutUndo();
 
             // ---- Controller
             var controllerGo = Child(root.transform, "Day1StoryController", Vector3.zero, 0f).gameObject;
@@ -117,23 +150,38 @@ namespace CreatureExperiment.StoryEditor
             so.FindProperty("mikeSmoking").objectReferenceValue = smoking;
             so.FindProperty("lunchRoute").objectReferenceValue = lunch;
             so.FindProperty("returnRoute").objectReferenceValue = back;
-            so.FindProperty("martExitRoute").objectReferenceValue = martExit;
+            so.FindProperty("storeExitRoute").objectReferenceValue = storeExit;
             so.FindProperty("smokingRoute").objectReferenceValue = smoke;
             so.FindProperty("exitRoute").objectReferenceValue = exit;
             so.FindProperty("workplaceZone").objectReferenceValue = workplace;
             so.FindProperty("workAreaZone").objectReferenceValue = workArea;
-            so.FindProperty("martInsideZone").objectReferenceValue = martIn;
-            so.FindProperty("martOutsideZone").objectReferenceValue = martOut;
+            so.FindProperty("storeInsideZone").objectReferenceValue = storeIn;
+            so.FindProperty("storeOutsideZone").objectReferenceValue = storeOut;
             so.FindProperty("smokingZone").objectReferenceValue = smokingArea;
             so.FindProperty("homeZone").objectReferenceValue = home;
-            so.FindProperty("martExitGate").objectReferenceValue = martGate;
+            so.FindProperty("workAreaNarrationZone").objectReferenceValue = workAreaNarration;
+            so.FindProperty("homeNarrationZone").objectReferenceValue = homeNarration;
+            so.FindProperty("storeExitGate").objectReferenceValue = storeGate;
             so.FindProperty("cigarettePackTemplate").objectReferenceValue = packT != null ? packT.gameObject : null;
             so.ApplyModifiedPropertiesWithoutUndo();
 
             EditorSceneManager.MarkSceneDirty(root.scene);
             Selection.activeGameObject = root;
-            Debug.Log("[Day1StoryBuilder] Built 'Story' (Day1StoryController, Mike, 6 routes, 6 zones).");
+            Debug.Log("[Day1StoryBuilder] Built 'Story' (Day1StoryController, Mike, 6 routes, 9 zones) for District v0.2.");
         }
+
+        // ---- Building-relative points (v0.1 frame → current root) --------------------------------------------------
+
+        private static Vector3 AtWorkplace(float x, float z, float y = Ground) =>
+            s_workplace.TransformPoint(new Vector3(x, y, z) - WorkplaceOriginalRootPos);
+        private static float WorkplaceYaw(float originalYaw) => s_workplace.eulerAngles.y + originalYaw;
+
+        private static Vector3 AtStore(float x, float z, float y = Ground) => s_store.TransformPoint(new Vector3(x, y, z));
+        private static float StoreYaw(float originalYaw) => s_store.eulerAngles.y + originalYaw;
+
+        private static Vector3 AtVilla(float x, float z, float y = Ground) => s_villa.TransformPoint(new Vector3(x, y, z));
+
+        // ---- Mike ------------------------------------------------------------------------------------------------
 
         private static StoryNpc BuildMike(Transform parent, Vector3 pos, float yaw, Transform route, GameObject cigTemplate, out StoryNpcSmoking smoking)
         {
@@ -190,6 +238,8 @@ namespace CreatureExperiment.StoryEditor
             return npc;
         }
 
+        // ---- Helpers ---------------------------------------------------------------------------------------------
+
         private static SwingDoor Door(string path)
         {
             var go = GameObject.Find(path);
@@ -210,9 +260,9 @@ namespace CreatureExperiment.StoryEditor
         private static StoryWaypoint Waypoint(Transform route, string name, Vector3 pos, float yaw) =>
             Child(route, name, pos, yaw).gameObject.AddComponent<StoryWaypoint>();
 
-        private static StoryZone Zone(Transform parent, string name, Vector3 center, Vector3 size)
+        private static StoryZone Zone(Transform parent, string name, Vector3 center, Vector3 size, float yaw)
         {
-            var t = Child(parent, name, center, 0f);
+            var t = Child(parent, name, center, yaw);
             t.localScale = size;
             return t.gameObject.AddComponent<StoryZone>();
         }

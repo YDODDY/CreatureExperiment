@@ -9,7 +9,8 @@ namespace CreatureExperiment.DailyLifeEditor
     /// Workplace had no lights; LightingEnvironment only changes sun / ambient / street lamps, so these stay on in both
     /// Day and Night). Long fluorescent-style fixtures (MAT_Light_Fixture body, MAT_Light_On_Cool lens) with a cool point
     /// light each, no shadows - the same style as the Villa corridor lights.
-    /// Builds "InteriorLighting" under Street/Workplace/Workplace_Interior; re-running replaces only that object.
+    /// Builds "InteriorLighting" under Street/Workplace/Workplace_Interior (positions relative to the interior, so it follows
+    /// the building when the Workplace moves); re-running replaces only that object.
     /// </summary>
     public static class WorkplaceLightingBuilder
     {
@@ -18,6 +19,7 @@ namespace CreatureExperiment.DailyLifeEditor
         private const float F1Ceiling = -0.3f; // underside of the 2F slab
         private const float F2Ceiling = 3.5f;  // underside of the roof
         private static readonly Color LightColor = new Color(0.92f, 0.96f, 1f);
+        private static readonly Vector3 OriginalInteriorPosition = new Vector3(0f, 0f, -45f);
 
         private struct Spot
         {
@@ -63,7 +65,8 @@ namespace CreatureExperiment.DailyLifeEditor
             var root = new GameObject(RootName);
             Undo.RegisterCreatedObjectUndo(root, "Build Workplace Interior Lighting");
             root.transform.SetParent(parent.transform, false);
-            root.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            root.transform.localPosition = Vector3.zero;
+            root.transform.localRotation = Quaternion.identity;
 
             Material body = Mat("MAT_Light_Fixture");
             Material lens = Mat("MAT_Light_On_Cool");
@@ -72,7 +75,11 @@ namespace CreatureExperiment.DailyLifeEditor
             {
                 var fixture = new GameObject("CeilingLight_" + s.Name);
                 fixture.transform.SetParent(root.transform, false);
-                fixture.transform.SetPositionAndRotation(new Vector3(s.X, s.Ceiling, s.Z), Quaternion.Euler(0f, s.AlongZ ? 90f : 0f, 0f));
+                // Spots are given in the Workplace's original frame (interior at (0,0,-45), unrotated): place them through the
+                // interior's current transform so they follow the building wherever it stands.
+                Vector3 local = new Vector3(s.X, s.Ceiling, s.Z) - OriginalInteriorPosition;
+                fixture.transform.SetPositionAndRotation(parent.transform.TransformPoint(local),
+                    parent.transform.rotation * Quaternion.Euler(0f, s.AlongZ ? 90f : 0f, 0f));
 
                 Box(fixture.transform, "Fixture_Body", new Vector3(0f, -0.025f, 0f), new Vector3(1.2f, 0.05f, 0.28f), body);
                 Box(fixture.transform, "Fixture_Lens", new Vector3(0f, -0.055f, 0f), new Vector3(1.1f, 0.012f, 0.2f), lens);

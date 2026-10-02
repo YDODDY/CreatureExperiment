@@ -15,7 +15,8 @@ namespace CreatureExperiment.Story
     ///
     /// Walk (<see cref="WalkRoute"/>): straight lines between the <see cref="StoryWaypoint"/> children of the route, kept on
     /// the ground with a downward ray (floors only - never snaps up onto a wall or barrier). A soft escort, never a lock:
-    /// - The player counts as <b>ahead</b> when they are nearer the route's end than the NPC still has to walk.
+    /// - The player counts as <b>ahead</b> when, projected onto the rest of the route, they are beyond the NPC and within
+    ///   <see cref="aheadMaxOffRoute"/> of it (a route that turns or crosses a street is followed, not cut short).
     /// - Not ahead and more than <see cref="waitDistance"/> away (fallen behind, or off to the side): it stops and faces
     ///   them until they are within <see cref="resumeDistance"/> - or go on ahead.
     /// - Ahead by more than <see cref="catchUpDistance"/>: it walks at <see cref="catchUpSpeed"/> instead of
@@ -45,6 +46,8 @@ namespace CreatureExperiment.Story
         [SerializeField] private float catchUpSpeed = 4.7f;
         [Tooltip("Player ahead on the route by more than this: catch-up speed.")]
         [SerializeField] private float catchUpDistance = 8f;
+        [Tooltip("Counts as ahead only within this distance of the rest of the route (further off = wandered away).")]
+        [SerializeField] private float aheadMaxOffRoute = 12f;
         [SerializeField] private float turnSpeed = 360f;
         [SerializeField] private float waitDistance = 9f;
         [SerializeField] private float resumeDistance = 5f;
@@ -261,14 +264,29 @@ namespace CreatureExperiment.Story
             return true;
         }
 
-        // The player is nearer the route's end than the NPC still has to walk along it.
+        // The player is further along the rest of the route than the NPC: project them onto the remaining polyline
+        // (NPC → next waypoint → … → end) and take the closest segment. Ahead = beyond the NPC along it and near it.
         private bool IsAheadOnRoute()
         {
-            Vector3 end = route.GetChild(route.childCount - 1).position;
-            float remaining = Flat(route.GetChild(waypointIndex).position - transform.position).magnitude;
-            for (int i = waypointIndex; i < route.childCount - 1; i++)
-                remaining += Flat(route.GetChild(i + 1).position - route.GetChild(i).position).magnitude;
-            return Flat(end - player.position).magnitude < remaining;
+            Vector3 p = Flat(player.position);
+            Vector3 a = Flat(transform.position);
+            float along = 0f, bestLateral = float.MaxValue, bestAlong = 0f;
+            for (int i = waypointIndex; i < route.childCount; i++)
+            {
+                Vector3 b = Flat(route.GetChild(i).position);
+                Vector3 seg = b - a;
+                float len = seg.magnitude;
+                float t = len > 0.001f ? Mathf.Clamp(Vector3.Dot(p - a, seg / len), 0f, len) : 0f;
+                float lateral = (a + (len > 0.001f ? seg / len : Vector3.zero) * t - p).magnitude;
+                if (lateral < bestLateral)
+                {
+                    bestLateral = lateral;
+                    bestAlong = along + t;
+                }
+                along += len;
+                a = b;
+            }
+            return bestAlong > 2f && bestLateral < aheadMaxOffRoute;
         }
 
         private void UpdateRecall()

@@ -10,9 +10,13 @@ namespace CreatureExperiment.Story
     public class StoryZone : MonoBehaviour
     {
         [SerializeField] private Color gizmoColor = new Color(1f, 0.6f, 0.1f, 0.8f);
+        [Tooltip("Optional: points inside this zone don't count (e.g. a buffer strip just inside a door).")]
+        [SerializeField] private StoryZone exclude;
 
         public bool Contains(Vector3 worldPoint)
         {
+            if (exclude != null && exclude != this && exclude.Contains(worldPoint))
+                return false;
             Vector3 p = transform.InverseTransformPoint(worldPoint);
             return Mathf.Abs(p.x) <= 0.5f && Mathf.Abs(p.y) <= 0.5f && Mathf.Abs(p.z) <= 0.5f;
         }
