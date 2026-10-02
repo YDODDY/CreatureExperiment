@@ -187,6 +187,7 @@ namespace CreatureExperiment.DailyLife
             if (!IsEdible)
                 return;
             Eaten?.Invoke(this);
+            ConsumeEvents.Raise(gameObject, ConsumeKind.Food);
             Destroy(gameObject);
         }
 

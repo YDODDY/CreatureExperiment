@@ -57,6 +57,20 @@ namespace CreatureExperiment.DailyLife
 
         public bool Blocking => blocking;
 
+        private System.Func<bool> _storyHold;
+        private System.Func<bool> _storyWarn;
+
+        /// <summary>
+        /// A story may also keep the player in (e.g. "buy lunch first"): while <paramref name="holdWhile"/> returns true the
+        /// doorway blocks exactly as for unpaid goods, and pushing out calls <paramref name="warn"/> (returns whether a
+        /// warning started). Unpaid goods always come first - the cashier's block and warning win. Pass nulls to clear.
+        /// </summary>
+        public void SetStoryHold(System.Func<bool> holdWhile, System.Func<bool> warn)
+        {
+            _storyHold = holdWhile;
+            _storyWarn = warn;
+        }
+
         private void Awake()
         {
             if (player == null)
@@ -95,17 +109,18 @@ namespace CreatureExperiment.DailyLife
             float innerFace = -(thickness * 0.5f + radius); // capsule centre just touching the barrier from inside
 
             bool unpaid = checkout.PlayerHasUnpaid();
-            if (!unpaid || local.z > 0f)
+            bool hold = unpaid || (_storyHold != null && _storyHold());
+            if (!hold || local.z > 0f)
                 blocking = false;                       // nothing to stop, or already outside: always open
             else if (local.z < innerFace - 0.02f)
                 blocking = true;                        // fully inside - safe to close without touching the capsule
             // else: straddling the opening - keep the current state (never switch on around the player)
             _barrier.enabled = blocking;
 
-            UpdateWarning(local, innerFace);
+            UpdateWarning(local, innerFace, unpaid);
         }
 
-        private void UpdateWarning(Vector3 local, float innerFace)
+        private void UpdateWarning(Vector3 local, float innerFace, bool unpaid)
         {
             bool nearOpening = Mathf.Abs(local.x) < openingSize.x * 0.5f + 0.2f;
             if (!blocking || local.z < innerFace - rearmDistance || Mathf.Abs(local.x) > openingSize.x * 0.5f + 0.8f)
@@ -120,7 +135,8 @@ namespace CreatureExperiment.DailyLife
             if (!PushingOut())
                 return;
 
-            if (checkout.WarnUnpaidExit())
+            bool started = unpaid ? checkout.WarnUnpaidExit() : _storyWarn != null && _storyWarn();
+            if (started)
                 warningArmed = false;
         }
 

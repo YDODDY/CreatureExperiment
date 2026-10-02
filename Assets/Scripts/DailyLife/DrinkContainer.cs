@@ -115,8 +115,10 @@ namespace CreatureExperiment.DailyLife
 
         private void Drink()
         {
-            if (full)
-                BecomeEmpty();
+            if (!full)
+                return;
+            ConsumeEvents.Raise(gameObject, ConsumeKind.Drink);
+            BecomeEmpty();
         }
 
         // --- First impact of a player throw

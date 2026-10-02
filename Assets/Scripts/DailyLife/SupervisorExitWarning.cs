@@ -44,9 +44,17 @@ namespace CreatureExperiment.DailyLife
 
         public bool WarningShownToday => warningShownToday;
 
+        /// <summary>
+        /// A story holds the warning back while the work day isn't over yet (Day 1: the lunch break after the morning's
+        /// quota). Nothing else about the warning changes.
+        /// </summary>
+        public void SetSuppressed(bool value) => suppressed = value;
+
+        private bool suppressed;
+
         /// <summary>Work for today is done (quota resolved), the player is still clocked in, and no warning yet today.</summary>
         public bool ShouldWarn =>
-            !warningShownToday && !_running
+            !suppressed && !warningShownToday && !_running
             && attendance != null && attendance.State == AttendanceState.ClockedIn
             && workShift != null && workShift.CanAcceptWork
             && workShift.Current.resolvedCount >= workShift.DailyQuota;

@@ -58,6 +58,9 @@ namespace CreatureExperiment.DailyLife
         private static PlayerInteractor s_player;
         private static ObjectiveHUD s_hud;
 
+        /// <summary>The loose item one take makes (read-only - e.g. to tell what a package holds).</summary>
+        public GameObject Template => template;
+
         private ConsumableStock Stock => stock != null ? stock : (stock = GetComponentInParent<ConsumableStock>());
 
         private static PlayerInteractor Player

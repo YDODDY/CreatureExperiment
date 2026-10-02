@@ -62,6 +62,8 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private ShiftResult current;
         [Tooltip("The last finished shift (clock-out, or the day ending without one).")]
         [SerializeField] private ShiftResult lastShiftResult;
+        [Tooltip("The finished segment before the current one, same shift (Day 1 morning while the afternoon runs).")]
+        [SerializeField] private ShiftResult previousSegmentResult;
 
         private readonly List<WorkItem> _spawned = new List<WorkItem>();
         private readonly List<GameObject> _runtime = new List<GameObject>();
@@ -101,7 +103,29 @@ namespace CreatureExperiment.DailyLife
             current = new ShiftResult { dailyQuota = dailyQuota };
         }
 
-        /// <summary>IncomingWorkBox: open once per day, only during the shift.</summary>
+        /// <summary>
+        /// Story: start the next work segment of the same shift (Day 1 afternoon). Still clocked in - attendance and the day
+        /// are untouched. The box closes and can be opened again for a fresh batch of <see cref="DailyQuota"/>; the counts
+        /// start from zero for this segment (the finished one is kept in <see cref="PreviousSegmentResult"/>). Items already
+        /// handled stay where they are until the day resets. False if no shift is running.
+        /// </summary>
+        public bool StartNextSegment()
+        {
+            if (!CanAcceptWork)
+                return false;
+            previousSegmentResult = current;
+            current = new ShiftResult { dailyQuota = dailyQuota };
+            boxOpened = false;
+            if (incomingBox != null)
+                incomingBox.SetOpenVisual(false);
+            Debug.Log("[WorkShift] Next work segment - box ready again.");
+            return true;
+        }
+
+        /// <summary>The segment before the current one (same shift), if <see cref="StartNextSegment"/> was used.</summary>
+        public ShiftResult PreviousSegmentResult => previousSegmentResult;
+
+        /// <summary>IncomingWorkBox: open once per segment (per day without segments), only during the shift.</summary>
         public bool TryOpenIncomingBox()
         {
             if (!CanAcceptWork || boxOpened || cubeTemplate == null || sphereTemplate == null)

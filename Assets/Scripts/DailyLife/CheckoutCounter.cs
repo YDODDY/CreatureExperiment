@@ -91,6 +91,9 @@ namespace CreatureExperiment.DailyLife
 
         public bool InConversation => _talking;
 
+        /// <summary>Raised after a successful payment (wallet charged, every product marked paid): counter, the products paid.</summary>
+        public static event System.Action<CheckoutCounter, IReadOnlyList<StoreProduct>> Paid;
+
         public bool CanUse => !_talking && Time.time >= _readyAt;
 
         public string StoreId => storeId;
@@ -241,7 +244,9 @@ namespace CreatureExperiment.DailyLife
                 return false;
             foreach (var p in _due)
                 p.MarkPaid();
+            var paid = new List<StoreProduct>(_due);
             _due.Clear();
+            Paid?.Invoke(this, paid);
             return true;
         }
 

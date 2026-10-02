@@ -6,17 +6,21 @@ using UnityEngine.UI;
 namespace CreatureExperiment.DailyLife
 {
     /// <summary>
-    /// The computer's power and what its monitor shows - a small fixed set of pages drawn on a World Space
-    /// canvas lying on the real screen face (<see cref="screenAnchor"/>), not a browser or an OS:
-    /// Desktop (인터넷 / 채팅 icons) → Internet (one fixed test page) or Chat (fixed lines advanced with E; E after the
-    /// last line closes the chat back to the desktop).
+    /// The computer's power and what its monitor shows - an old desktop OS look drawn on a World Space canvas lying on
+    /// the real screen face (<see cref="screenAnchor"/>), not a browser or an OS:
+    /// a teal desktop with three icons down the left (인터넷 / 채팅 / RPG게임) and a grey taskbar; each icon opens a small
+    /// window with a title bar and an [X] that goes back to the desktop.
+    /// - 인터넷: one fixed test page.
+    /// - 채팅: fixed lines advanced with E; E after the last line closes the chat back to the desktop.
+    /// - RPG게임: a test game window - "Press F to end game"; <see cref="EndGame"/> (F, read by <see cref="ComputerStation"/>)
+    ///   shows THE END and raises <see cref="GameEnded"/>. No real game yet.
     ///
     /// Power is its own state, separate from "being used" (<see cref="ComputerStation"/>): off shows the monitor's
     /// own dark screen (the canvas is hidden), on shows the current page. Nothing resets it between days.
     ///
     /// There is no EventSystem in the scene, so clicks are not uGUI events: the station passes the mouse position
     /// and this tests it against the visible buttons' rects (<see cref="Hover"/> / <see cref="Click"/>). The canvas is
-    /// built at runtime under the anchor; the page texts below are placeholder content meant to be swapped later.
+    /// built at runtime under the anchor; icons are plain Images (squares + a generated circle), no art assets.
     /// </summary>
     public class ComputerScreen : MonoBehaviour
     {
@@ -40,16 +44,25 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private string chatSpeaker = "상대";
         [SerializeField] private string[] chatLines = { "안녕하세요. 테스트 메시지입니다.", "E로 다음 줄이 나옵니다.", "테스트 대화는 여기까지입니다." };
 
-        private static readonly Color BackgroundColor = new Color(0.09f, 0.2f, 0.3f);
-        private static readonly Color BarColor = new Color(0.05f, 0.07f, 0.09f);
-        private static readonly Color IconColor = new Color(0.18f, 0.36f, 0.5f);
-        private static readonly Color IconHoverColor = new Color(0.3f, 0.55f, 0.72f);
-        private static readonly Color ButtonColor = new Color(0.25f, 0.28f, 0.32f);
-        private static readonly Color ButtonHoverColor = new Color(0.4f, 0.45f, 0.5f);
-        private static readonly Color PageColor = new Color(0.95f, 0.95f, 0.93f);
-        private static readonly Color PageTextColor = new Color(0.12f, 0.12f, 0.12f);
+        [Header("RPG game (test window)")]
+        [SerializeField] private string gameTitle = "RPG게임";
+        [SerializeField] private string gamePrompt = "Press F to end game";
+        [SerializeField] private string gameEndText = "THE END";
+        [SerializeField] private string taskbarClock = "오후 9:30";
 
-        private enum Page { Desktop, Internet, Chat }
+        /// <summary>Raised when the RPG test game is ended (F) - the ending is on screen.</summary>
+        public static event Action<ComputerScreen> GameEnded;
+
+        private static readonly Color DesktopColor = new Color(0.0f, 0.45f, 0.47f);
+        private static readonly Color FaceColor = new Color(0.75f, 0.75f, 0.75f);
+        private static readonly Color LightEdge = new Color(1f, 1f, 1f);
+        private static readonly Color DarkEdge = new Color(0.35f, 0.35f, 0.35f);
+        private static readonly Color TitleBarColor = new Color(0.0f, 0.0f, 0.5f);
+        private static readonly Color IconHover = new Color(0.1f, 0.2f, 0.75f, 0.45f);
+        private static readonly Color ButtonHover = new Color(0.86f, 0.86f, 0.86f);
+        private static readonly Color PageTextColor = new Color(0.08f, 0.08f, 0.08f);
+
+        private enum Page { Desktop, Internet, Chat, Game }
 
         private sealed class ScreenButton
         {
@@ -57,21 +70,25 @@ namespace CreatureExperiment.DailyLife
             public Image Background;
             public Color Normal;
             public Color Hover;
-            public GameObject Page;
             public Action OnClick;
         }
 
         private readonly List<ScreenButton> _buttons = new List<ScreenButton>();
         private GameObject _canvasRoot;
-        private GameObject _desktop, _internet, _chat;
-        private Text _chatText, _chatHint;
+        private GameObject _internet, _chat, _game;
+        private Text _chatText, _chatHint, _gameText, _gameHint;
         private Font _font;
+        private Sprite _circle;
         private bool _isOn;
         private bool _interactive;
         private Page _page;
         private int _chatShown;
+        private bool _gameOver;
 
         public bool IsOn => _isOn;
+
+        /// <summary>The RPG window is open and the game hasn't been ended yet.</summary>
+        public bool IsGameRunning => _isOn && _interactive && _page == Page.Game && !_gameOver;
 
         private void Awake()
         {
@@ -133,10 +150,22 @@ namespace CreatureExperiment.DailyLife
             return true;
         }
 
+        /// <summary>F in the RPG window: the (test) game ends - THE END is shown and <see cref="GameEnded"/> raised once.</summary>
+        public void EndGame()
+        {
+            if (!IsGameRunning)
+                return;
+            _gameOver = true;
+            _gameText.text = gameEndText;
+            _gameText.fontSize = 110;
+            _gameHint.text = "";
+            GameEnded?.Invoke(this);
+        }
+
         private ScreenButton ButtonAt(Camera cam, Vector2 screenPoint)
         {
             foreach (var b in _buttons)
-                if (b.Page.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(b.Rect, screenPoint, cam))
+                if (b.Rect.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(b.Rect, screenPoint, cam))
                     return b;
             return null;
         }
@@ -150,13 +179,20 @@ namespace CreatureExperiment.DailyLife
         private void ShowPage(Page page)
         {
             _page = page;
-            if (_desktop != null) _desktop.SetActive(page == Page.Desktop);
             if (_internet != null) _internet.SetActive(page == Page.Internet);
             if (_chat != null) _chat.SetActive(page == Page.Chat);
+            if (_game != null) _game.SetActive(page == Page.Game);
             if (page == Page.Chat)
             {
                 _chatShown = Mathf.Min(1, chatLines.Length);
                 RefreshChat();
+            }
+            if (page == Page.Game)
+            {
+                _gameOver = false;
+                _gameText.text = gamePrompt;
+                _gameText.fontSize = 48;
+                _gameHint.text = "E · 컴퓨터 종료";
             }
         }
 
@@ -177,6 +213,7 @@ namespace CreatureExperiment.DailyLife
         {
             Transform anchor = screenAnchor != null ? screenAnchor : transform;
             _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _circle = MakeCircleSprite(64);
 
             _canvasRoot = new GameObject("ScreenCanvas", typeof(RectTransform), typeof(Canvas));
             var rt = (RectTransform)_canvasRoot.transform;
@@ -187,45 +224,138 @@ namespace CreatureExperiment.DailyLife
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.worldCamera = Camera.main;
 
-            Panel(rt, "Background", BackgroundColor, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            Rect(rt, "Desktop", DesktopColor, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
 
-            // Task bar with the controls, on every page.
-            var bar = Panel(rt, "TaskBar", BarColor, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 56f));
-            Label(bar, "Computer 0.1", 26, Color.white, TextAnchor.MiddleLeft, new Vector2(24f, 0f), Vector2.zero);
-            Label(bar, "LMB 클릭 · E 진행 / 종료", 26, new Color(0.8f, 0.85f, 0.9f), TextAnchor.MiddleRight, Vector2.zero, new Vector2(-24f, 0f));
+            // Desktop icons, top-left, one under the other.
+            var icons = Rect(rt, "Icons", Color.clear, new Vector2(0f, 1f), new Vector2(0f, 1f), Vector2.zero, Vector2.zero);
+            DesktopIcon(icons, "Icon_Internet", "인터넷", 0, InternetGlyph, () => ShowPage(Page.Internet));
+            DesktopIcon(icons, "Icon_Chat", "채팅", 1, ChatGlyph, () => ShowPage(Page.Chat));
+            DesktopIcon(icons, "Icon_RPG", "RPG게임", 2, SwordGlyph, () => ShowPage(Page.Game));
 
-            var content = Panel(rt, "Pages", Color.clear, Vector2.zero, Vector2.one, new Vector2(0f, 56f), Vector2.zero);
+            // Windows (one open at a time)
+            var client = Window(rt, "Window_Internet", "인터넷 - " + internetAddress, out _internet);
+            var address = Rect(client, "AddressBar", Color.white, new Vector2(0f, 1f), Vector2.one, new Vector2(8f, -52f), new Vector2(-8f, -8f));
+            Bevel(address, sunken: true);
+            Label(address, "주소  " + internetAddress, 24, PageTextColor, TextAnchor.MiddleLeft, new Vector2(12f, 0f), Vector2.zero);
+            var body = Rect(client, "PageBody", Color.white, Vector2.zero, Vector2.one, new Vector2(8f, 8f), new Vector2(-8f, -60f));
+            Label(body, internetTitle, 40, PageTextColor, TextAnchor.UpperLeft, new Vector2(28f, 0f), new Vector2(-28f, -20f)).fontStyle = FontStyle.Bold;
+            Label(body, internetBody, 28, PageTextColor, TextAnchor.UpperLeft, new Vector2(28f, 20f), new Vector2(-28f, -90f));
 
-            // Desktop
-            _desktop = Panel(content, "Desktop", Color.clear, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject;
-            Label(_desktop.transform, "바탕화면", 36, Color.white, TextAnchor.UpperLeft, new Vector2(32f, 0f), new Vector2(0f, -24f));
-            Button(_desktop, "Icon_Internet", "인터넷", 44, IconColor, IconHoverColor,
-                new Vector2(0.5f, 0.5f), new Vector2(-170f, -10f), new Vector2(280f, 220f), () => ShowPage(Page.Internet));
-            Button(_desktop, "Icon_Chat", "채팅", 44, IconColor, IconHoverColor,
-                new Vector2(0.5f, 0.5f), new Vector2(170f, -10f), new Vector2(280f, 220f), () => ShowPage(Page.Chat));
-
-            // Internet test page
-            _internet = Panel(content, "Internet", Color.clear, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject;
-            var address = Panel(_internet.transform, "AddressBar", new Color(0.82f, 0.84f, 0.86f), new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -64f), Vector2.zero);
-            Label(address, internetAddress, 28, PageTextColor, TextAnchor.MiddleLeft, new Vector2(24f, 0f), Vector2.zero);
-            var page = Panel(_internet.transform, "PageBody", PageColor, Vector2.zero, Vector2.one, new Vector2(0f, 0f), new Vector2(0f, -64f));
-            Label(page, internetTitle, 44, PageTextColor, TextAnchor.UpperLeft, new Vector2(40f, 0f), new Vector2(-40f, -28f)).fontStyle = FontStyle.Bold;
-            Label(page, internetBody, 30, PageTextColor, TextAnchor.UpperLeft, new Vector2(40f, 110f), new Vector2(-40f, -100f));
-            Button(_internet, "Back", "돌아가기", 30, ButtonColor, ButtonHoverColor,
-                new Vector2(1f, 0f), new Vector2(-140f, 52f), new Vector2(220f, 64f), () => ShowPage(Page.Desktop));
-
-            // Chat test
-            _chat = Panel(content, "Chat", Color.clear, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject;
-            var chatHeader = Panel(_chat.transform, "Header", BarColor, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -64f), Vector2.zero);
-            Label(chatHeader, chatTitle, 32, Color.white, TextAnchor.MiddleLeft, new Vector2(24f, 0f), Vector2.zero);
-            _chatText = Label(_chat.transform, "", 32, Color.white, TextAnchor.UpperLeft, new Vector2(40f, 110f), new Vector2(-40f, -90f));
+            client = Window(rt, "Window_Chat", chatTitle, out _chat);
+            var chatBody = Rect(client, "ChatBody", Color.white, Vector2.zero, Vector2.one, new Vector2(8f, 52f), new Vector2(-8f, -8f));
+            Bevel(chatBody, sunken: true);
+            _chatText = Label(chatBody, "", 30, PageTextColor, TextAnchor.UpperLeft, new Vector2(20f, 12f), new Vector2(-20f, -14f));
             _chatText.supportRichText = true;
-            _chatHint = Label(_chat.transform, "", 28, new Color(0.75f, 0.85f, 0.95f), TextAnchor.LowerLeft, new Vector2(40f, 28f), new Vector2(-300f, 0f));
-            Button(_chat, "Back", "돌아가기", 30, ButtonColor, ButtonHoverColor,
-                new Vector2(1f, 0f), new Vector2(-140f, 52f), new Vector2(220f, 64f), () => ShowPage(Page.Desktop));
+            _chatHint = Label(client, "", 24, PageTextColor, TextAnchor.MiddleLeft, new Vector2(14f, 8f), new Vector2(-14f, -0f));
+            _chatHint.rectTransform.anchorMax = new Vector2(1f, 0f);
+            _chatHint.rectTransform.offsetMax = new Vector2(-14f, 48f);
+
+            client = Window(rt, "Window_RPG", gameTitle, out _game);
+            var screen = Rect(client, "GameScreen", Color.black, Vector2.zero, Vector2.one, new Vector2(8f, 8f), new Vector2(-8f, -8f));
+            var glyph = Rect(screen, "Emblem", Color.clear, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(-40f, -150f), new Vector2(40f, -40f));
+            SwordGlyph(glyph);
+            _gameText = Label(screen, gamePrompt, 48, new Color(1f, 0.85f, 0.3f), TextAnchor.MiddleCenter, new Vector2(20f, 40f), new Vector2(-20f, -130f));
+            _gameText.fontStyle = FontStyle.Bold;
+            _gameHint = Label(screen, "", 22, new Color(0.7f, 0.7f, 0.7f), TextAnchor.LowerRight, new Vector2(12f, 10f), new Vector2(-14f, 0f));
+
+            // Taskbar (drawn last: always on top)
+            var bar = Rect(rt, "TaskBar", FaceColor, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 52f));
+            Rect(bar, "TopEdge", LightEdge, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -2f), Vector2.zero);
+            var start = Rect(bar, "StartButton", FaceColor, Vector2.zero, Vector2.zero, new Vector2(6f, 6f), new Vector2(118f, 46f));
+            Bevel(start, sunken: false);
+            var logo = Rect(start, "Logo", Color.clear, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(10f, -12f), new Vector2(34f, 12f));
+            Rect(logo, "R", new Color(0.85f, 0.15f, 0.1f), new Vector2(0f, 0.5f), new Vector2(0.5f, 1f), Vector2.zero, new Vector2(-1f, 0f));
+            Rect(logo, "G", new Color(0.15f, 0.65f, 0.2f), new Vector2(0.5f, 0.5f), Vector2.one, new Vector2(1f, 0f), Vector2.zero);
+            Rect(logo, "B", new Color(0.15f, 0.3f, 0.85f), Vector2.zero, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(-1f, -1f));
+            Rect(logo, "Y", new Color(0.95f, 0.8f, 0.1f), new Vector2(0.5f, 0f), new Vector2(1f, 0.5f), new Vector2(1f, 0f), new Vector2(0f, -1f));
+            Label(start, "시작", 26, Color.black, TextAnchor.MiddleLeft, new Vector2(44f, 0f), Vector2.zero).fontStyle = FontStyle.Bold;
+            var tray = Rect(bar, "Tray", FaceColor, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-150f, 7f), new Vector2(-6f, 45f));
+            Bevel(tray, sunken: true);
+            Label(tray, taskbarClock, 22, Color.black, TextAnchor.MiddleCenter, Vector2.zero, Vector2.zero);
+            Label(bar, "LMB 클릭 · E 종료", 20, new Color(0.25f, 0.25f, 0.25f), TextAnchor.MiddleRight, new Vector2(0f, 0f), new Vector2(-170f, 0f));
         }
 
-        private static RectTransform Panel(Transform parent, string name, Color color, Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax)
+        // An icon cell: glyph on top, label under it; the cell highlights on hover and opens on click.
+        private void DesktopIcon(RectTransform parent, string name, string label, int index, Action<RectTransform> glyph, Action onClick)
+        {
+            var cell = Rect(parent, name, new Color(0f, 0f, 0f, 0f), new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(18f, -150f - index * 150f), new Vector2(148f, -18f - index * 150f));
+            var g = Rect(cell, "Glyph", Color.clear, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(-38f, -86f), new Vector2(38f, -10f));
+            glyph(g);
+            var text = Label(cell, label, 24, Color.white, TextAnchor.UpperCenter, new Vector2(0f, 0f), new Vector2(0f, -90f));
+            text.gameObject.AddComponent<Shadow>().effectColor = new Color(0f, 0f, 0f, 0.8f);
+            AddButton(cell, new Color(0f, 0f, 0f, 0f), IconHover, onClick);
+        }
+
+        // A window filling most of the screen above the taskbar; returns its client area.
+        private RectTransform Window(RectTransform parent, string name, string title, out GameObject root)
+        {
+            var frame = Rect(parent, name, FaceColor, Vector2.zero, Vector2.one, new Vector2(190f, 70f), new Vector2(-30f, -22f));
+            Bevel(frame, sunken: false);
+            root = frame.gameObject;
+            var titleBar = Rect(frame, "TitleBar", TitleBarColor, new Vector2(0f, 1f), Vector2.one, new Vector2(4f, -44f), new Vector2(-4f, -4f));
+            Label(titleBar, title, 24, Color.white, TextAnchor.MiddleLeft, new Vector2(12f, 0f), new Vector2(-60f, 0f)).fontStyle = FontStyle.Bold;
+            var close = Rect(titleBar, "Close", FaceColor, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-42f, -15f), new Vector2(-6f, 15f));
+            Bevel(close, sunken: false);
+            Label(close, "X", 22, Color.black, TextAnchor.MiddleCenter, Vector2.zero, Vector2.zero).fontStyle = FontStyle.Bold;
+            AddButton(close, FaceColor, ButtonHover, () => ShowPage(Page.Desktop));
+            return Rect(frame, "Client", Color.clear, Vector2.zero, Vector2.one, new Vector2(4f, 4f), new Vector2(-4f, -48f));
+        }
+
+        // ---- Glyphs (plain shapes) ------------------------------------------------------------------------
+
+        private void InternetGlyph(RectTransform g)
+        {
+            Circle(g, "Globe", new Color(0.2f, 0.45f, 0.9f), Vector2.zero, Vector2.one);
+            Circle(g, "LandA", new Color(0.25f, 0.7f, 0.3f), new Vector2(0.18f, 0.45f), new Vector2(0.5f, 0.8f));
+            Circle(g, "LandB", new Color(0.25f, 0.7f, 0.3f), new Vector2(0.52f, 0.15f), new Vector2(0.82f, 0.48f));
+            Rect(g, "Equator", new Color(1f, 1f, 1f, 0.6f), new Vector2(0.05f, 0.5f), new Vector2(0.95f, 0.5f), new Vector2(0f, -1.5f), new Vector2(0f, 1.5f));
+            Rect(g, "Meridian", new Color(1f, 1f, 1f, 0.6f), new Vector2(0.5f, 0.05f), new Vector2(0.5f, 0.95f), new Vector2(-1.5f, 0f), new Vector2(1.5f, 0f));
+        }
+
+        private void ChatGlyph(RectTransform g)
+        {
+            var tail = Rect(g, "Tail", Color.white, new Vector2(0.2f, 0.12f), new Vector2(0.2f, 0.12f), new Vector2(-9f, -9f), new Vector2(9f, 9f));
+            tail.localRotation = Quaternion.Euler(0f, 0f, 45f);
+            Circle(g, "Bubble", Color.white, new Vector2(0f, 0.12f), Vector2.one);
+            for (int i = 0; i < 3; i++)
+                Circle(g, "Dot" + i, new Color(0.3f, 0.3f, 0.35f), new Vector2(0.26f + i * 0.18f, 0.5f), new Vector2(0.38f + i * 0.18f, 0.62f));
+        }
+
+        private void SwordGlyph(RectTransform g)
+        {
+            var sword = Rect(g, "Sword", Color.clear, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
+            sword.localRotation = Quaternion.Euler(0f, 0f, -45f);
+            Rect(sword, "Blade", new Color(0.85f, 0.88f, 0.92f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-5f, -8f), new Vector2(5f, 44f));
+            Rect(sword, "Edge", new Color(1f, 1f, 1f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-1f, -8f), new Vector2(1f, 44f));
+            Rect(sword, "Guard", new Color(0.85f, 0.65f, 0.15f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-18f, -14f), new Vector2(18f, -8f));
+            Rect(sword, "Grip", new Color(0.45f, 0.25f, 0.1f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-4f, -32f), new Vector2(4f, -14f));
+            Circle(sword, "Pommel", new Color(0.85f, 0.65f, 0.15f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-7f, -42f), new Vector2(7f, -28f));
+        }
+
+        // ---- Helpers -------------------------------------------------------------------------------------
+
+        private void AddButton(RectTransform rt, Color normal, Color hover, Action onClick)
+        {
+            var img = rt.GetComponent<Image>();
+            if (img == null)
+                img = rt.gameObject.AddComponent<Image>();
+            img.color = normal;
+            img.raycastTarget = false;
+            _buttons.Add(new ScreenButton { Rect = rt, Background = img, Normal = normal, Hover = hover, OnClick = onClick });
+        }
+
+        // Old-style raised / sunken edge: two light and two dark 2-unit lines.
+        private static void Bevel(RectTransform rt, bool sunken)
+        {
+            Color tl = sunken ? DarkEdge : LightEdge, br = sunken ? LightEdge : DarkEdge;
+            Rect(rt, "EdgeT", tl, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -2f), Vector2.zero);
+            Rect(rt, "EdgeL", tl, Vector2.zero, new Vector2(0f, 1f), Vector2.zero, new Vector2(2f, 0f));
+            Rect(rt, "EdgeB", br, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 2f));
+            Rect(rt, "EdgeR", br, new Vector2(1f, 0f), Vector2.one, new Vector2(-2f, 0f), Vector2.zero);
+        }
+
+        private static RectTransform Rect(Transform parent, string name, Color color, Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax)
         {
             var go = new GameObject(name, typeof(RectTransform));
             var rt = (RectTransform)go.transform;
@@ -243,9 +373,16 @@ namespace CreatureExperiment.DailyLife
             return rt;
         }
 
+        private RectTransform Circle(Transform parent, string name, Color color, Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin = default, Vector2 offsetMax = default)
+        {
+            var rt = Rect(parent, name, color, anchorMin, anchorMax, offsetMin, offsetMax);
+            rt.GetComponent<Image>().sprite = _circle;
+            return rt;
+        }
+
         private Text Label(Transform parent, string text, int size, Color color, TextAnchor alignment, Vector2 offsetMin, Vector2 offsetMax)
         {
-            var rt = Panel(parent, "Text", Color.clear, Vector2.zero, Vector2.one, offsetMin, offsetMax);
+            var rt = Rect(parent, "Text", Color.clear, Vector2.zero, Vector2.one, offsetMin, offsetMax);
             var t = rt.gameObject.AddComponent<Text>();
             t.font = _font;
             t.text = text;
@@ -258,22 +395,21 @@ namespace CreatureExperiment.DailyLife
             return t;
         }
 
-        private void Button(GameObject page, string name, string text, int size, Color normal, Color hover,
-            Vector2 anchor, Vector2 position, Vector2 buttonSize, Action onClick)
+        private static Sprite MakeCircleSprite(int size)
         {
-            var rt = Panel(page.transform, name, normal, anchor, anchor, Vector2.zero, Vector2.zero);
-            rt.sizeDelta = buttonSize;
-            rt.anchoredPosition = position;
-            Label(rt, text, size, Color.white, TextAnchor.MiddleCenter, Vector2.zero, Vector2.zero);
-            _buttons.Add(new ScreenButton
-            {
-                Rect = rt,
-                Background = rt.GetComponent<Image>(),
-                Normal = normal,
-                Hover = hover,
-                Page = page,
-                OnClick = onClick,
-            });
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+            float r = size * 0.5f;
+            var px = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float d = Mathf.Sqrt((x + 0.5f - r) * (x + 0.5f - r) + (y + 0.5f - r) * (y + 0.5f - r));
+                    byte a = (byte)(Mathf.Clamp01(r - d) * 255f);
+                    px[y * size + x] = new Color32(255, 255, 255, a);
+                }
+            tex.SetPixels32(px);
+            tex.Apply();
+            return Sprite.Create(tex, new UnityEngine.Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
         }
     }
 }

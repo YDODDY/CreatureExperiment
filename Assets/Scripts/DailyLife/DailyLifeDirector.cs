@@ -51,6 +51,11 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private int day = 1;
         [SerializeField] private DayPhase phase = DayPhase.CommuteToWork;
         [SerializeField] private bool canSleep;
+        [Tooltip("A story script owns the main objective (MainTaskHUD): the phase line (출근하기 / 퇴근하기 / 잠자기) is not shown. " +
+                 "The shift's own progress line while Working and the notices stay.")]
+        [SerializeField] private bool phaseObjectiveHidden;
+        [Tooltip("A story script holds sleep back (the bed refuses) until its own last beat.")]
+        [SerializeField] private bool sleepBlocked;
 
         private string _lastObjective;
 
@@ -61,6 +66,19 @@ namespace CreatureExperiment.DailyLife
 
         /// <summary>Raised after the bed rolls the day over, with the new day number. Listeners reset their own per-day state.</summary>
         public event System.Action<int> DayStarted;
+
+        /// <summary>
+        /// Story: while hidden, the objective line shows only the Working shift's progress (<see cref="WorkShiftController.ObjectiveText"/>),
+        /// never the phase line - the story's main task is on MainTaskHUD instead. Notices are unaffected.
+        /// </summary>
+        /// <summary>Story: while blocked the bed refuses (same notice as before clock-out) - e.g. Day 1 before its last beat.</summary>
+        public void SetSleepBlocked(bool blocked) => sleepBlocked = blocked;
+
+        public void SetPhaseObjectiveHidden(bool hidden)
+        {
+            phaseObjectiveHidden = hidden;
+            RefreshObjective(force: true);
+        }
 
         private void Awake()
         {
@@ -133,7 +151,7 @@ namespace CreatureExperiment.DailyLife
         /// <summary>Bed: end the day and roll to the next. Gated on <see cref="CanSleep"/> (short notice if not) and the Sleep phase.</summary>
         public void UseBed()
         {
-            if (!canSleep)
+            if (!canSleep || sleepBlocked)
             {
                 if (objectiveHud != null)
                     objectiveHud.ShowNotice(notTimeToSleepMessage);
@@ -183,6 +201,8 @@ namespace CreatureExperiment.DailyLife
                 case DayPhase.Sleep:         s = "잠자기"; break;
                 default:                     s = ""; break;
             }
+            if (phaseObjectiveHidden && phase != DayPhase.Working)
+                s = "";
 
             if (!force && s == _lastObjective)
                 return;

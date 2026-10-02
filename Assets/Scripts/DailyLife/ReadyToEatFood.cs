@@ -85,6 +85,7 @@ namespace CreatureExperiment.DailyLife
             Camera cam = Camera.main;
             ParticleFx.Burst(at, cam != null ? -cam.transform.up + cam.transform.forward * 0.5f : Vector3.down, crumbColor, 7, 0.018f);
             Eaten?.Invoke(this);
+            ConsumeEvents.Raise(gameObject, ConsumeKind.Food);
             Destroy(gameObject); // the interactor's held reference reads as empty once the object is gone
         }
     }

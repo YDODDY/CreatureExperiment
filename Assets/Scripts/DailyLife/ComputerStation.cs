@@ -25,6 +25,11 @@ namespace CreatureExperiment.DailyLife
     /// passes <see cref="SetFocused"/> on). Using the computer switches them off (the lock clears the aim focus).
     ///
     /// The world keeps running (no timeScale change).
+    ///
+    /// While a <see cref="DialogueUI"/> line is on screen (a story narration over the computer) the computer reads no
+    /// input at all - the line's owner advances it. F (the "Throw" action, switched off for the world by the lock) is read
+    /// here only while the screen's game window runs, and ends the game (<see cref="ComputerScreen.EndGame"/>).
+    /// <see cref="Entered"/> is raised once the computer is ready to use.
     /// </summary>
     [RequireComponent(typeof(ComputerScreen))]
     public class ComputerStation : MonoBehaviour, IUsable, IFocusTarget
@@ -36,6 +41,8 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private ComputerScreen screen;
         [Tooltip("Found in the scene if empty.")]
         [SerializeField] private PlayerInteractor player;
+        [Tooltip("Found in the scene if empty. While it shows a line, the computer takes no input.")]
+        [SerializeField] private DialogueUI dialogue;
 
         [Header("Focus outline")]
         [Tooltip("Outline group of the computer - every renderer under it is shown while focused.")]
@@ -61,12 +68,17 @@ namespace CreatureExperiment.DailyLife
         private Quaternion _camLocalRot;
         private CursorLockMode _prevCursorLock;
         private bool _prevCursorVisible;
-        private InputAction _interact, _click;
+        private InputAction _interact, _click, _throw;
         private readonly List<Renderer> _hiddenHeld = new List<Renderer>();
         private float _readyAt;
         private readonly List<Renderer> _outlines = new List<Renderer>();
 
         public bool InUse => _mode != Mode.Idle;
+        /// <summary>Seated, camera at the screen, cursor free - the computer takes input.</summary>
+        public bool IsActive => _mode == Mode.Active;
+
+        /// <summary>Raised when someone has sat down and the computer is ready to use (camera arrived, cursor free).</summary>
+        public static event System.Action<ComputerStation> Entered;
 
         public bool CanUse => _mode == Mode.Idle && SittableChair.Occupied == null && Time.time >= _readyAt;
 
@@ -92,6 +104,9 @@ namespace CreatureExperiment.DailyLife
             var map = movement != null && movement.InputActions != null ? movement.InputActions.FindActionMap("Player", throwIfNotFound: false) : null;
             _interact = map?.FindAction(DialogueInput.AdvanceAction, throwIfNotFound: false);
             _click = map?.FindAction("Attack", throwIfNotFound: false);
+            _throw = map?.FindAction("Throw", throwIfNotFound: false);
+            if (dialogue == null)
+                dialogue = FindFirstObjectByType<DialogueUI>();
 
             if (computerOutline != null) _outlines.AddRange(computerOutline.GetComponentsInChildren<Renderer>(true));
             if (chairOutline != null) _outlines.AddRange(chairOutline.GetComponentsInChildren<Renderer>(true));
@@ -138,8 +153,10 @@ namespace CreatureExperiment.DailyLife
 
             _interact?.Enable();
             _click?.Enable();
+            _throw?.Enable();
             screen.SetInteractive(true);
             _mode = Mode.Active;
+            Entered?.Invoke(this);
         }
 
         private void Update()
@@ -147,8 +164,17 @@ namespace CreatureExperiment.DailyLife
             if (_mode != Mode.Active)
                 return;
 
+            if (dialogue != null && dialogue.IsShowing)
+                return; // a story line over the computer: its owner reads the keys
+
             Vector2 pointer = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
             screen.Hover(_camera, pointer);
+
+            if (screen.IsGameRunning && _throw != null && _throw.WasPressedThisFrame())
+            {
+                screen.EndGame();
+                return;
+            }
 
             if (_interact != null && _interact.WasPressedThisFrame())
             {
