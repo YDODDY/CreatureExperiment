@@ -19,6 +19,8 @@ namespace CreatureExperiment.DailyLife
     /// 1. An order still being made, or anything loose left in <see cref="pickupArea"/> (the last order not taken yet):
     ///    one line, no menu - nothing new is ordered.
     /// 2. Menu: every <see cref="CafeMenuItem"/> under <see cref="menuRoot"/> ("Americano · $3.50") + "그만두기".
+    ///    A menu whose items name two or more <see cref="CafeMenuItem.Category"/>s (fast food, pub) asks the category
+    ///    first ("음료" / "안주" / "그만두기"), then that category's items + "뒤로" (back to the categories).
     /// 3. Confirm: "Americano, $3.50. 주문하시겠어요?" 예 / 아니요 - 아니요 goes back to the menu.
     /// 4. 예: the pickup spot is checked again, then the <see cref="PlayerWallet"/> is charged (not enough: nothing is
     ///    taken, "돈이 부족합니다."), then the order is placed - "잠시만 기다려주세요.". Nothing is charged for an order
@@ -61,6 +63,9 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private string speakerName = "바리스타";
         [SerializeField] private string greetingLine = "어서오세요. 주문하시겠어요?";
         [SerializeField] private string cancelOption = "그만두기";
+        [SerializeField] private string backOption = "뒤로";
+        [Tooltip("Question over one category's items ({0} = category).")]
+        [SerializeField] private string categoryQuestionFormat = "{0}, 어떤 걸로 드릴까요?";
         [SerializeField] private string confirmFormat = "{0}, {1}. 주문하시겠어요?";
         [SerializeField] private string yesOption = "예";
         [SerializeField] private string noOption = "아니요";
@@ -89,12 +94,13 @@ namespace CreatureExperiment.DailyLife
         private ObjectiveHUD _hud;
         private readonly List<Renderer> _outlines = new List<Renderer>();
         private readonly List<CafeMenuItem> _menu = new List<CafeMenuItem>();
+        private readonly List<string> _categories = new List<string>();
 
         private CafeMenuItem _preparing; // paid, not on the counter yet
         private float _serveAt;
 
         public bool InConversation => _talking;
-        public bool CanUse => !_talking && Time.time >= _readyAt;
+        public bool CanUse => isActiveAndEnabled && !_talking && Time.time >= _readyAt; // switched off = closed (the pub by day)
 
         public string FocusName => CanUse ? usePrompt : "";
         public Transform FocusTransform => transform;
@@ -127,7 +133,11 @@ namespace CreatureExperiment.DailyLife
                     {
                         child.gameObject.SetActive(false);
                         _menu.Add(entry);
+                        if (entry.Category.Length > 0 && !_categories.Contains(entry.Category))
+                            _categories.Add(entry.Category);
                     }
+            if (_categories.Count < 2)
+                _categories.Clear(); // one group is no grouping
             WriteMenuBoard();
 
             if (counterOutline != null) _outlines.AddRange(counterOutline.GetComponentsInChildren<Renderer>(true));
@@ -166,25 +176,53 @@ namespace CreatureExperiment.DailyLife
                 yield break;
             }
 
-            int pick = 0;
-            while (true)
+            bool grouped = _categories.Count > 0;
+            int categoryPick = 0;
+            bool done = false;
+            while (!done)
             {
-                yield return Choose(greetingLine, MenuOptions(), pick, c => pick = c);
-                if (pick >= _menu.Count)
+                List<CafeMenuItem> shown = _menu;
+                string question = greetingLine;
+                if (grouped)
                 {
-                    yield return ClosingLine(cancelledLine);
-                    break;
+                    var groups = new string[_categories.Count + 1];
+                    _categories.CopyTo(groups);
+                    groups[_categories.Count] = cancelOption;
+                    yield return Choose(greetingLine, groups, categoryPick, c => categoryPick = c);
+                    if (categoryPick >= _categories.Count)
+                    {
+                        yield return ClosingLine(cancelledLine);
+                        break;
+                    }
+                    string category = _categories[categoryPick];
+                    shown = _menu.FindAll(m => m.Category == category);
+                    question = string.Format(categoryQuestionFormat, category);
                 }
 
-                CafeMenuItem item = _menu[pick];
-                int answer = 0;
-                yield return Choose(string.Format(confirmFormat, item.MenuName, PlayerWallet.FormatUsd(item.Price)),
-                    new[] { yesOption, noOption }, 0, c => answer = c);
-                if (answer != 0)
-                    continue; // 아니요: back to the menu, same line still selected
+                int pick = 0;
+                while (true)
+                {
+                    yield return Choose(question, MenuOptions(shown, grouped ? backOption : cancelOption), pick, c => pick = c);
+                    if (pick >= shown.Count)
+                    {
+                        if (grouped)
+                            break; // 뒤로: back to the categories
+                        yield return ClosingLine(cancelledLine);
+                        done = true;
+                        break;
+                    }
 
-                yield return ClosingLine(TryOrder(item));
-                break;
+                    CafeMenuItem item = shown[pick];
+                    int answer = 0;
+                    yield return Choose(string.Format(confirmFormat, item.MenuName, PlayerWallet.FormatUsd(item.Price)),
+                        new[] { yesOption, noOption }, 0, c => answer = c);
+                    if (answer != 0)
+                        continue; // 아니요: back to the menu, same line still selected
+
+                    yield return ClosingLine(TryOrder(item));
+                    done = true;
+                    break;
+                }
             }
 
             yield return Close();
@@ -263,12 +301,12 @@ namespace CreatureExperiment.DailyLife
                 made.transform.position += Vector3.up * (surfaceY - bottom + 0.002f);
         }
 
-        private string[] MenuOptions()
+        private static string[] MenuOptions(List<CafeMenuItem> items, string last)
         {
-            var options = new string[_menu.Count + 1];
-            for (int i = 0; i < _menu.Count; i++)
-                options[i] = $"{_menu[i].MenuName}  ·  {PlayerWallet.FormatUsd(_menu[i].Price)}";
-            options[_menu.Count] = cancelOption;
+            var options = new string[items.Count + 1];
+            for (int i = 0; i < items.Count; i++)
+                options[i] = $"{items[i].MenuName}  ·  {PlayerWallet.FormatUsd(items[i].Price)}";
+            options[items.Count] = last;
             return options;
         }
 
@@ -278,8 +316,16 @@ namespace CreatureExperiment.DailyLife
                 return;
             var text = new System.Text.StringBuilder(menuBoardTitle);
             text.Append('\n');
+            string group = null;
             foreach (var entry in _menu)
+            {
+                if (_categories.Count > 0 && entry.Category != group)
+                {
+                    group = entry.Category;
+                    text.Append("\n[").Append(group).Append(']');
+                }
                 text.Append('\n').Append(entry.MenuName).Append("   ").Append(PlayerWallet.FormatUsd(entry.Price));
+            }
             menuBoard.text = text.ToString();
         }
 

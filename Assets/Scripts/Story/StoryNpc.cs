@@ -28,6 +28,11 @@ namespace CreatureExperiment.Story
     /// <see cref="Recalled"/> is raised once (the story shows "이쪽이야."); it re-arms only after the player comes back
     /// within <see cref="recallRearmDistance"/>.
     /// While standing it turns to face <see cref="FaceTowards"/>' point, if one was given.
+    ///
+    /// Talk-ready feedback (never a conversation by itself): a small "..." floats over the head (camera-facing, built at
+    /// runtime) while talkable and the player is within <see cref="indicatorRange"/>; it hides during any dialogue and when
+    /// talk-ready ends. Aimed at, the usual focus label shows <see cref="talkPrompt"/>. Standing and talk-ready, it turns to
+    /// a player who comes within <see cref="turnToPlayerDistance"/> (unless the story gave it a point to face).
     /// </summary>
     public class StoryNpc : MonoBehaviour, IUsable, IFocusTarget
     {
@@ -35,6 +40,18 @@ namespace CreatureExperiment.Story
         [Tooltip("Head point the player's view turns to in a conversation.")]
         [SerializeField] private Transform lookTarget;
         [SerializeField] private string talkPrompt = "E · 대화하기";
+
+        [Header("Talk-ready indicator")]
+        [SerializeField] private bool showTalkIndicator = true;
+        [SerializeField] private string indicatorText = "...";
+        [Tooltip("Height of the indicator above the head point (m).")]
+        [SerializeField] private float indicatorHeight = 0.75f;
+        [Tooltip("Shown only while the player is within this distance (m).")]
+        [SerializeField] private float indicatorRange = 11f;
+        [SerializeField] private float indicatorCharacterSize = 0.08f;
+        [SerializeField] private Color indicatorColor = new Color(1f, 0.95f, 0.75f, 1f);
+        [Tooltip("Talk-ready and standing: turn to a player this close (0 = never).")]
+        [SerializeField] private float turnToPlayerDistance = 3.5f;
 
         [Header("Route")]
         [Tooltip("Parent whose children (StoryWaypoint) are the route, in order.")]
@@ -90,6 +107,8 @@ namespace CreatureExperiment.Story
         private Vector3 _facePoint;
         private float _phase;
         private float _swing;    // 0..1, how much the limbs swing (eases in / out)
+        private Transform _indicator;
+        private DialogueUI _dialogue;
 
         public string DisplayName => displayName;
         public Transform LookTarget => lookTarget != null ? lookTarget : transform;
@@ -177,6 +196,7 @@ namespace CreatureExperiment.Story
                     player = p.transform;
             }
             speed = walkSpeed;
+            BuildIndicator();
         }
 
         private void Update()
@@ -188,6 +208,9 @@ namespace CreatureExperiment.Story
                 playerAhead = false;
                 if (_hasFace)
                     TurnTowards(_facePoint - transform.position, dt);
+                else if (_talkable && player != null && turnToPlayerDistance > 0f
+                         && Flat(player.position - transform.position).magnitude < turnToPlayerDistance)
+                    TurnTowards(player.position - transform.position, dt);
             }
             UpdateRecall();
             AnimateLimbs(moved, dt);
@@ -326,6 +349,46 @@ namespace CreatureExperiment.Story
             SetSwing(legR, -s * legSwing);
             SetSwing(armL, -s * armSwing);
             SetSwing(armR, s * armSwing);
+        }
+
+        // ---- Talk-ready indicator --------------------------------------------------------------------------------
+
+        private void BuildIndicator()
+        {
+            if (!showTalkIndicator || _indicator != null)
+                return;
+            var go = new GameObject("TalkIndicator");
+            go.transform.SetParent(transform, false);
+            var text = go.AddComponent<TextMesh>();
+            text.text = indicatorText;
+            text.anchor = TextAnchor.MiddleCenter;
+            text.alignment = TextAlignment.Center;
+            text.fontSize = 64;
+            text.characterSize = indicatorCharacterSize;
+            text.fontStyle = FontStyle.Bold;
+            text.color = indicatorColor;
+            go.AddComponent<WorldTextFont>(); // built-in font on the depth-tested world text material
+            _indicator = go.transform;
+            go.SetActive(false);
+        }
+
+        private void LateUpdate()
+        {
+            if (_indicator == null)
+                return;
+            if (_dialogue == null)
+                _dialogue = FindFirstObjectByType<DialogueUI>();
+            Camera cam = Camera.main;
+            bool show = _talkable && cam != null && player != null
+                && (_dialogue == null || !_dialogue.IsShowing)
+                && Vector3.Distance(player.position, transform.position) <= indicatorRange;
+            if (_indicator.gameObject.activeSelf != show)
+                _indicator.gameObject.SetActive(show);
+            if (!show)
+                return;
+            float bob = Mathf.Sin(Time.time * 2.2f) * 0.025f;
+            _indicator.position = LookTarget.position + Vector3.up * (indicatorHeight + bob);
+            _indicator.rotation = Quaternion.LookRotation(_indicator.position - cam.transform.position, Vector3.up); // faces the camera
         }
 
         private static void SetSwing(Transform t, float angle)

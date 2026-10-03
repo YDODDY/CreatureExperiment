@@ -264,6 +264,47 @@ namespace CreatureExperiment.Player
             RestoreActive();
         }
 
+        private List<Renderer> _heldVisualHidden;
+
+        /// <summary>
+        /// The held item whose renderers are off for presentation only (<see cref="SetHeldVisualVisible"/>), or null -
+        /// lets an item that reads "renderers off while held" as "put away" (the flashlight) tell the two apart.
+        /// </summary>
+        public static Interactable PresentationHiddenItem { get; private set; }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetPresentationStatics() => PresentationHiddenItem = null;
+
+        /// <summary>
+        /// Presentation only: hide / show the hand's item (hiding in a locker - it would poke out in front of the eye).
+        /// Same rule as a stashed slot: only the renderers that are on are switched off, and exactly those come back.
+        /// Nothing else changes - still held, same slot, colliders / Rigidbody / components (a lit flashlight, a full
+        /// glass, a pack's count) untouched.
+        /// </summary>
+        public void SetHeldVisualVisible(bool visible)
+        {
+            if (!visible)
+            {
+                if (_heldVisualHidden != null || _held == null)
+                    return;
+                _heldVisualHidden = new List<Renderer>();
+                PresentationHiddenItem = _held;
+                foreach (var r in _held.GetComponentsInChildren<Renderer>())
+                {
+                    if (!r.enabled) continue;
+                    r.enabled = false;
+                    _heldVisualHidden.Add(r);
+                }
+                return;
+            }
+            if (_heldVisualHidden == null)
+                return;
+            foreach (var r in _heldVisualHidden)
+                if (r != null) r.enabled = true;
+            _heldVisualHidden = null;
+            PresentationHiddenItem = null;
+        }
+
         // The hand's item goes into its slot: renderers off, shape data kept. The hand is empty afterwards.
         private void StashActive()
         {
@@ -307,6 +348,31 @@ namespace CreatureExperiment.Player
 
         // Picking up while holding: the held item is stashed, the first empty slot becomes active and takes the
         // target. If the target can't be claimed, everything goes back as it was.
+        /// <summary>
+        /// Put <paramref name="item"/> into a free slot WITHOUT changing what is in the hand - a cigarette taken out of
+        /// the pack the player is holding goes into another slot and the pack stays in the hand. Empty hand: it simply
+        /// becomes the held item. False if every slot is full or the item can't be claimed.
+        /// </summary>
+        public bool TryStashNew(Interactable item)
+        {
+            if (item == null)
+                return false;
+            if (_held == null)
+                return Pickup(item);
+            int free = FreeSlot();
+            if (free < 0)
+                return false;
+            int previous = _active;
+            StashActive();
+            _active = free;
+            RestoreActive();
+            bool ok = Pickup(item);
+            StashActive();
+            _active = previous;
+            RestoreActive();
+            return ok;
+        }
+
         private bool PickupIntoFreeSlot(Interactable target)
         {
             int free = FreeSlot();
@@ -440,6 +506,15 @@ namespace CreatureExperiment.Player
             // A dedicated optional receiver (pan, meal plate) keeps the aim for every held item: one it does not
             // handle is refused below - never swapped with, never placed on.
             var receiver = col.GetComponentInParent<IHeldItemReceiver>();
+            // Cooking / serving receivers take items with Left Click: for E they are plain objects (E lifts the pan / plate).
+            // The label still says what Left Click would do with the held item.
+            string primaryHint = null;
+            if (receiver is IOptionalHeldItemReceiver byPrimary && byPrimary.ReceivesWithPrimary)
+            {
+                if (_held != null && byPrimary.AppliesTo(_held) && hit.distance <= pickupRange)
+                    primaryHint = byPrimary.CanReceive(_held) ? $"LMB {byPrimary.PrimaryReceivePrompt}" : byPrimary.GetRejectPrompt(_held);
+                receiver = null;
+            }
             if (receiver is IOptionalHeldItemReceiver optional && !optional.AppliesTo(_held) && !(optional.IsDedicated && _held != null))
                 receiver = null;
             if (_held != null && receiver as Object != null && inMask)
@@ -462,11 +537,27 @@ namespace CreatureExperiment.Player
                 return null;
 
             // An object the creature is already holding is not a focus / pickup candidate.
-            var item = col.GetComponentInParent<Interactable>();
+            // Food seated in a pan is part of the pan here: the aim (label, E) goes to the pan.
+            Interactable rawItem = col.GetComponentInParent<Interactable>();
+            var item = Interactable.PickupTarget(rawItem);
+            // Seated on something that is not a pickup (a cup on the hot water dispenser): that seat owns the aim and the label.
+            if (item == null && rawItem != null && rawItem.PickupLock is IFocusTarget seat)
+                focus = seat;
             if (item != null && !item.IsHeld)
             {
                 _aimPickup = item;
+                if (!string.IsNullOrEmpty(primaryHint))
+                    _aimLabelOverride = $"{item.DisplayName}\nE 들기\n{primaryHint}";
                 return item;
+            }
+
+            // A Left Click station / container that is not a pickup (the fridge door egg holder, the hot water dispenser): its
+            // label, hands full or not - or what Left Click would do with the held item there ("LMB 뜨거운 물 받기").
+            if (item == null && focus is IAimedPrimaryAction)
+            {
+                if (!string.IsNullOrEmpty(primaryHint))
+                    _aimLabelOverride = primaryHint;
+                return focus;
             }
 
             // Anything else: a label with no action (empty hands only). A receiver that will not
@@ -887,6 +978,19 @@ namespace CreatureExperiment.Player
         /// released and our references cleared first, so nothing here points at the object once the
         /// receiver removes it from the world. No PhysicalEvent - this is not a place / throw.
         /// </summary>
+        /// <summary>
+        /// Hand the held item to <paramref name="receiver"/> exactly as an Interact hand-over does - for receivers that take
+        /// the item with the held item's own Left Click (an egg into a pan, toast onto a plate). False (nothing changes) if
+        /// nothing is held or the receiver won't take it now.
+        /// </summary>
+        public bool TryHandOverHeld(IHeldItemReceiver receiver)
+        {
+            if (_held == null || receiver == null || !receiver.CanReceive(_held))
+                return false;
+            HandOver(receiver);
+            return true;
+        }
+
         private void HandOver(IHeldItemReceiver receiver)
         {
             Interactable obj = _held;

@@ -27,6 +27,10 @@ namespace CreatureExperiment.Player
         private float _yaw;
         private float _pitch;
 
+        /// <summary>Current look yaw / pitch in degrees (pitch positive = down) - read by things that clamp the view (a locker).</summary>
+        public float Yaw => _yaw;
+        public float Pitch => _pitch;
+
         // --- TEMPORARY DEBUG (camera jitter investigation) ------------------------------------------
         // Read-only seams for PlayerCameraJitterDebug, all captured INLINE in Update() at the exact
         // instant each value exists - no external component has to guess or re-derive them via

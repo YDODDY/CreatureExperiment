@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using CreatureExperiment.Interaction;
+using CreatureExperiment.Player;
 
 namespace CreatureExperiment.DailyLife
 {
@@ -8,7 +9,9 @@ namespace CreatureExperiment.DailyLife
     {
         Egg,
         Bacon,
-        Bread
+        Bread,
+        Ramen,
+        Soup
     }
 
     public enum FoodState
@@ -25,23 +28,31 @@ namespace CreatureExperiment.DailyLife
     /// Cooking finishes with a short one-shot "puff" (<see cref="cookPuff"/>): a few small blobs rise,
     /// swell and vanish - only at the moment it turns cooked, never while cooking.
     ///
-    /// Eating is the primary action (Left Click, <c>MealEater</c>) on edible food - held or aimed at up
-    /// close. Interact stays the plain physical pickup / place / throw even when the food is edible.
-    /// Food served on a <see cref="MealPlate"/> is eaten with the plate.
+    /// Left Click while held (<see cref="IHeldPrimaryAction"/>): aimed at a cooking / serving receiver that takes food with
+    /// Left Click (<see cref="IOptionalHeldItemReceiver.ReceivesWithPrimary"/> - a pan, the toaster, a pot, a plate, a bowl),
+    /// it is handed over exactly like an Interact hand-over (the receiver decides what it takes; a refusal shows its prompt).
+    /// Aimed anywhere else the press is not used, so the router goes on: other actions on the item (an egg into the fridge
+    /// holder), then eating edible food - or, not edible yet, <see cref="notReadyNotice"/> ("조리가 필요해.").
+    /// Interact stays the plain physical pickup / place / throw. Food on a plate / in a pan is seat-locked there
+    /// (<see cref="Interactable.IsPickupLocked"/>): eaten with the plate, served out of the pan.
     ///
     /// Bread can also carry one topping (jam or butter), spread on with a coated knife
     /// (<see cref="TryApplyTopping"/>). It is independent of cooking - toasting keeps it - and does not
     /// change what the bread is: still Bread, still edible, still fits the plate's bread spot.
     /// </summary>
-    public class FoodItem : MonoBehaviour
+    public class FoodItem : MonoBehaviour, IHeldPrimaryAction
     {
         /// <summary>Raised when any food is eaten, just before it is destroyed. Nothing listens yet.</summary>
         public static event Action<FoodItem> Eaten;
 
         [SerializeField] private FoodKind kind;
         [SerializeField] private FoodState state = FoodState.Raw;
-        [Tooltip("Can be eaten without cooking (bread).")]
+        [Tooltip("Can be eaten without cooking. Off for every cooking ingredient (bread is toasted first).")]
         [SerializeField] private bool edibleRaw;
+        [Tooltip("Shown on Left Click while it can't be eaten yet and nothing takes it.")]
+        [SerializeField] private string notReadyNotice = "조리가 필요해.";
+        [Tooltip("Reach of the Left Click hand-over (m).")]
+        [SerializeField] private float handOverReach = 1.6f;
         [SerializeField] private float cookTime = 4f;
         [SerializeField] private string cookedName;
 
@@ -80,6 +91,7 @@ namespace CreatureExperiment.DailyLife
         public bool IsEdible => IsCooked || edibleRaw;
         public SpreadType Topping => topping;
         public float CookProgress01 => cookTime > 0f ? Mathf.Clamp01(_cookProgress / cookTime) : 1f;
+        public string NotReadyNotice => notReadyNotice;
 
         /// <summary>A raw egg still in its shell, loose (not in a pan / on a plate) - one that can go back into egg storage.</summary>
         public bool IsWholeRawEgg => kind == FoodKind.Egg && state == FoodState.Raw && !_cracked && Slot == null && Plate == null;
@@ -169,6 +181,29 @@ namespace CreatureExperiment.DailyLife
             cookPuff.localScale = _puffScale;
             cookPuff.gameObject.SetActive(false);
             _puffTime = -1f;
+        }
+
+        /// <summary>
+        /// Left Click while held: aimed at a receiver that takes food with Left Click, hand it over (or show why not). Not
+        /// aimed at one: false - the router goes on (fridge holder, eating, the not-ready notice).
+        /// </summary>
+        public bool PrimaryPress(Ray aim)
+        {
+            if (!Physics.Raycast(aim, out RaycastHit hit, handOverReach, ~0, QueryTriggerInteraction.Ignore))
+                return false;
+            var receiver = hit.collider.GetComponentInParent<IOptionalHeldItemReceiver>();
+            if (receiver == null || !receiver.ReceivesWithPrimary || !receiver.AppliesTo(Interactable))
+                return false;
+            if (!receiver.CanReceive(Interactable))
+            {
+                ObjectiveHUD.Notice(receiver.GetRejectPrompt(Interactable));
+                return true;
+            }
+            if (!(Interactable.Holder is PlayerInteractor player) || !player.TryHandOverHeld(receiver))
+                return true;
+            if (receiver is FoodSlot slot && slot.Cooks && !slot.IsHeating)
+                ObjectiveHUD.Notice(slot.NotHeatingNotice); // in the pot, but nothing will cook until it is on a burner
+            return true;
         }
 
         /// <summary>Spread <paramref name="spread"/> on a bread that has nothing on it yet. False (unchanged) otherwise - no layering, no mixing.</summary>

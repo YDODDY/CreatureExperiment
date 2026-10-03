@@ -18,6 +18,8 @@ namespace CreatureExperiment.DailyLife
     /// packing box) and is handed to <see cref="RuntimeStickerRoot"/> so a new day clears it. On a
     /// <see cref="PackingBox"/> the finished strip is offered to <see cref="PackingBox.TrySealWithTape"/>.
     ///
+    /// A store roll (<see cref="StoreProduct"/>) refuses to draw until it is paid for.
+    ///
     /// A strip is a visual trace only: no collider, no Rigidbody, no joint - it holds nothing together and
     /// never stops a door. The roll stays in the hand.
     /// </summary>
@@ -62,6 +64,10 @@ namespace CreatureExperiment.DailyLife
         public bool PrimaryPress(Ray aim)
         {
             PrimaryCancel();
+            if (StoreProduct.RefuseUnpaidUse(this))
+                return true; // a store roll not paid for yet
+            if (markRoot == null)
+                markRoot = FindFirstObjectByType<RuntimeStickerRoot>(); // a roll made from a prefab / store copy has no scene reference
             if (!Physics.Raycast(aim, out RaycastHit hit, reach, ~0, QueryTriggerInteraction.Ignore))
                 return false;
             if (!string.IsNullOrEmpty(playerTag) && hit.collider.CompareTag(playerTag))

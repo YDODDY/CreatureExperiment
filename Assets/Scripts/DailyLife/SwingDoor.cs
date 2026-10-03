@@ -36,6 +36,8 @@ namespace CreatureExperiment.DailyLife
         [Header("Lock")]
         [Tooltip("While locked and closed, Use() does nothing. Off by default - ordinary doors never lock.")]
         [SerializeField] private bool locked;
+        [Tooltip("A light metal clank on open / close (lockers) - ProceduralSfx.MetalDoor.")]
+        [SerializeField] private bool metalSound;
         [SerializeField] private string lockedPrompt = "잠겨 있습니다";
 
         private bool _isOpen;
@@ -94,6 +96,8 @@ namespace CreatureExperiment.DailyLife
 
             _fromAngle = _isOpen ? openAngle : closedAngle;
             _toAngle = _isOpen ? closedAngle : openAngle;
+            if (metalSound)
+                ProceduralSfx.Play(SfxKind.MetalDoor, transform.position, 0.55f);
             _elapsed = 0f;
             _isMoving = true;
             if (leafCollider != null)

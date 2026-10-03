@@ -20,7 +20,7 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private float bottomMargin = 18f;
         [SerializeField] private int fontSize = 13;
 
-        private GUIStyle _name, _small, _money;
+        private GUIStyle _name, _small, _money, _hint;
         private Texture2D _white;
 
         private void Awake()
@@ -67,6 +67,27 @@ namespace CreatureExperiment.DailyLife
 
             if (wallet != null)
                 GUI.Label(new Rect(x0, y - 26f, width, 22f), $"잔액 {PlayerWallet.FormatUsd(wallet.Balance)}", _money);
+
+            // A container in the hand (cigarette pack, egg carton): its Left Click takes one out - say so, with the count.
+            IAimedPrimaryAction take = AimedPrimary.Find(interactor.HeldItem);
+            string hint = take != null ? take.PrimaryHint : PreparedHint(interactor.HeldItem);
+            if (!string.IsNullOrEmpty(hint))
+            {
+                var r = new Rect(x0 + interactor.ActiveSlot * (slotSize + gap) - 40f, y - 50f, slotSize + 80f, 22f);
+                GUI.Label(r, hint, _hint);
+            }
+        }
+
+        // A hot-water item in the hand, prepared and still full: what Left Click does with it now.
+        private static string PreparedHint(Interactable held)
+        {
+            if (held == null || !held.TryGetComponent(out HotWaterPreparable prep) || !prep.IsPrepared)
+                return null;
+            if (held.TryGetComponent(out DrinkContainer drink))
+                return drink.HasDrink ? "LMB 마시기" : null;
+            if (held.TryGetComponent(out SpillableContents contents))
+                return contents.HasContents ? "LMB 먹기" : null;
+            return null;
         }
 
         private void EnsureStyles()
@@ -79,6 +100,8 @@ namespace CreatureExperiment.DailyLife
             _small.normal.textColor = Color.white;
             _money = new GUIStyle(GUI.skin.label) { fontSize = fontSize + 3, alignment = TextAnchor.MiddleRight, fontStyle = FontStyle.Bold };
             _money.normal.textColor = Color.white;
+            _hint = new GUIStyle(GUI.skin.label) { fontSize = fontSize, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+            _hint.normal.textColor = new Color(1f, 0.92f, 0.6f);
             _white = Texture2D.whiteTexture;
         }
 

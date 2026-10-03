@@ -4,7 +4,7 @@ using CreatureExperiment.Interaction;
 
 namespace CreatureExperiment.Player
 {
-    /// <summary>How a held item is brought to the mouth.</summary>
+    /// <summary>How a held item is used: brought to the mouth, or (pan) tipped / swung in front of the player.</summary>
     public enum HeldUseStyle
     {
         /// <summary>Quick lift, two little bites, gone.</summary>
@@ -12,7 +12,11 @@ namespace CreatureExperiment.Player
         /// <summary>Lift and tip the top toward the mouth, then back down (the container stays).</summary>
         Drink,
         /// <summary>Held at the lips for as long as the button is down (cigarette).</summary>
-        Smoke
+        Smoke,
+        /// <summary>Tipped forward and down, as if sliding something out onto what the player looks at (pan → plate).</summary>
+        Serve,
+        /// <summary>A short wind-up and sweep across the view, back to the hold pose. Purely visual - no hit, no damage.</summary>
+        Swing
     }
 
     /// <summary>
@@ -27,7 +31,8 @@ namespace CreatureExperiment.Player
     ///
     /// Two kinds, both driven by the item's own Left Click action (which keeps its PrimaryActive up meanwhile, so the
     /// interactor blocks E / F / Right Click / slot keys exactly as it already does for the tape roll):
-    /// - one-shot (<see cref="PlayOneShot"/>, eat / drink): up, use (the callback - eat, empty the bottle), down.
+    /// - one-shot (<see cref="PlayOneShot"/>, eat / drink / serve / swing): up, use (the callback - eat, empty the bottle,
+    ///   slide the food onto the plate), down. Serve and Swing pose relative to the hold pose, not the mouth.
     /// - hold (<see cref="BeginHold"/> / <see cref="EndHold"/>, smoke): up while held, down on release.
     /// </summary>
     [DefaultExecutionOrder(100)] // after PlayerInteractor, so the pose written here is the one rendered
@@ -58,6 +63,24 @@ namespace CreatureExperiment.Player
         [SerializeField] private Vector3 smokeMouthOffset = new Vector3(0.04f, -0.03f, 0.11f);
         [Tooltip("Smoking pose (euler in the hold anchor's space, absolute): pointing forward, a little down and right.")]
         [SerializeField] private Vector3 smokeTilt = new Vector3(18f, 18f, 0f);
+
+        [Header("Serve (pan → plate)")]
+        [SerializeField] private float serveSeconds = 0.6f;
+        [Tooltip("Fraction of the motion at which the food moves over (tilted by then).")]
+        [SerializeField] private float serveUseAt = 0.5f;
+        [Tooltip("Offset from the hold pose (hold anchor space): forward and down, toward what the player looks at.")]
+        [SerializeField] private Vector3 serveOffset = new Vector3(0f, -0.07f, 0.14f);
+        [Tooltip("Tilt added on top of the hold rotation (hold anchor space): tipping the far edge down.")]
+        [SerializeField] private Vector3 serveTilt = new Vector3(38f, 0f, 0f);
+
+        [Header("Swing")]
+        [SerializeField] private float swingSeconds = 0.45f;
+        [Tooltip("Wind-up pose (offset / euler on top of the hold pose): up and to the right.")]
+        [SerializeField] private Vector3 swingWindupOffset = new Vector3(0.12f, 0.07f, -0.04f);
+        [SerializeField] private Vector3 swingWindupTilt = new Vector3(-25f, 40f, 0f);
+        [Tooltip("End of the sweep: down, left and forward.")]
+        [SerializeField] private Vector3 swingStrikeOffset = new Vector3(-0.2f, -0.06f, 0.14f);
+        [SerializeField] private Vector3 swingStrikeTilt = new Vector3(30f, -55f, 0f);
 
         private Interactable _item;
         private HeldUseStyle _style;
@@ -96,8 +119,13 @@ namespace CreatureExperiment.Player
             _style = style;
             _oneShot = true;
             _time = 0f;
-            _duration = style == HeldUseStyle.Drink ? drinkSeconds : eatSeconds;
-            _useAt = style == HeldUseStyle.Drink ? drinkUseAt : eatUseAt;
+            switch (style)
+            {
+                case HeldUseStyle.Drink: _duration = drinkSeconds; _useAt = drinkUseAt; break;
+                case HeldUseStyle.Serve: _duration = serveSeconds; _useAt = serveUseAt; break;
+                case HeldUseStyle.Swing: _duration = swingSeconds; _useAt = 1f; break; // no use moment
+                default: _duration = eatSeconds; _useAt = eatUseAt; break;
+            }
             _onUse = onUse;
             _onDone = onDone;
             _used = false;
@@ -172,6 +200,11 @@ namespace CreatureExperiment.Player
                     Stop(restore: true);
                     return;
                 }
+                if (_style == HeldUseStyle.Swing)
+                {
+                    ApplySwing(k);
+                    return;
+                }
             }
             else
             {
@@ -191,6 +224,15 @@ namespace CreatureExperiment.Player
             Vector3 holdPos = _item.HoldPositionOffset;
             Quaternion holdRot = _item.HoldRotationOffset;
 
+            Transform t = _item.transform;
+            if (_style == HeldUseStyle.Serve)
+            {
+                // Not to the mouth: tipped forward from where it is held.
+                t.localPosition = Vector3.LerpUnclamped(holdPos, holdPos + serveOffset, blend);
+                t.localRotation = Quaternion.Slerp(holdRot, Quaternion.Euler(serveTilt) * holdRot, blend);
+                return;
+            }
+
             Vector3 offset, tilt;
             switch (_style)
             {
@@ -206,9 +248,37 @@ namespace CreatureExperiment.Player
                 ? Quaternion.Euler(tilt + new Vector3(bob * 6f, 0f, 0f)) * holdRot
                 : Quaternion.Euler(tilt);
 
-            Transform t = _item.transform;
             t.localPosition = Vector3.LerpUnclamped(holdPos, mouthPos, blend);
             t.localRotation = Quaternion.Slerp(holdRot, mouthRot, blend);
+        }
+
+        // Wind up (0 - 0.25), sweep across (0.25 - 0.6), back to the hold pose (0.6 - 1).
+        private void ApplySwing(float k)
+        {
+            Vector3 holdPos = _item.HoldPositionOffset;
+            Quaternion holdRot = _item.HoldRotationOffset;
+            Vector3 offset, tilt;
+            if (k < 0.25f)
+            {
+                float a = Mathf.SmoothStep(0f, 1f, k / 0.25f);
+                offset = Vector3.Lerp(Vector3.zero, swingWindupOffset, a);
+                tilt = Vector3.Lerp(Vector3.zero, swingWindupTilt, a);
+            }
+            else if (k < 0.6f)
+            {
+                float a = Mathf.SmoothStep(0f, 1f, (k - 0.25f) / 0.35f);
+                offset = Vector3.Lerp(swingWindupOffset, swingStrikeOffset, a);
+                tilt = Vector3.Lerp(swingWindupTilt, swingStrikeTilt, a);
+            }
+            else
+            {
+                float a = Mathf.SmoothStep(0f, 1f, (k - 0.6f) / 0.4f);
+                offset = Vector3.Lerp(swingStrikeOffset, Vector3.zero, a);
+                tilt = Vector3.Lerp(swingStrikeTilt, Vector3.zero, a);
+            }
+            Transform t = _item.transform;
+            t.localPosition = holdPos + offset;
+            t.localRotation = Quaternion.Euler(tilt) * holdRot;
         }
 
         private void Stop(bool restore)

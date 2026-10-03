@@ -23,6 +23,10 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private float dip = 0.03f;
         [SerializeField] private float buttonTravel = 0.006f;
         [SerializeField] private float buttonTime = 0.25f;
+        [Tooltip("Procedural flush sound (ProceduralSfx.Flush).")]
+        [SerializeField] private bool playSound = true;
+        [Range(0f, 1f)]
+        [SerializeField] private float volume = 0.6f;
 
         private bool _flushing;
         private float _elapsed;
@@ -52,6 +56,8 @@ namespace CreatureExperiment.DailyLife
                 return;
             _flushing = true;
             _elapsed = 0f;
+            if (playSound)
+                ProceduralSfx.Play(SfxKind.Flush, transform.position, volume);
         }
 
         private void Update()

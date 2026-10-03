@@ -25,6 +25,8 @@ namespace CreatureExperiment.Interaction
         private Transform _target;
         private Renderer[] _targetRenderers;
         private string _name;
+        private IFocusTarget _focus;
+        private string _override;
         private GUIStyle _style;
 
         private void Awake()
@@ -39,6 +41,8 @@ namespace CreatureExperiment.Interaction
         /// <param name="nameOverride">Text to show instead of <see cref="IFocusTarget.FocusName"/> (e.g. a rejection prompt), or null.</param>
         public void Show(IFocusTarget focus, string nameOverride = null)
         {
+            _focus = focus;
+            _override = nameOverride;
             _target = focus.FocusTransform;
             _targetRenderers = _target != null ? _target.GetComponentsInChildren<Renderer>() : null;
             _name = nameOverride ?? focus.FocusName;
@@ -53,6 +57,8 @@ namespace CreatureExperiment.Interaction
 
         public void Hide()
         {
+            _focus = null;
+            _override = null;
             _target = null;
             _targetRenderers = null;
             _name = null;
@@ -62,7 +68,20 @@ namespace CreatureExperiment.Interaction
 
         private void LateUpdate()
         {
-            if (_target != null && text != null)
+            if (_target == null)
+                return;
+            // A focus whose name changes while it is looked at (a hot water dispenser: "받는 중..." -> "꺼내기", a container's
+            // count) is shown live; an override is the caller's and is refreshed by the caller.
+            if (_override == null && _focus as Object != null)
+            {
+                string now = _focus.FocusName;
+                if (now != _name)
+                {
+                    _name = now;
+                    if (text != null) text.text = now;
+                }
+            }
+            if (text != null)
                 UpdatePose();
         }
 

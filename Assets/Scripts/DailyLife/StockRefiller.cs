@@ -11,10 +11,11 @@ namespace CreatureExperiment.DailyLife
     /// Two shapes, one component:
     /// - On a loose item (an Egg): it goes in as one unit and the object is gone. Only a whole raw egg counts - a
     ///   fried or cracked one is not storage material, and its Left Click stays "eat".
-    /// - On a package with its own stock (an EggsBundle): as many units as fit move over in one click
-    ///   (min(free slots, units left)); the package keeps the rest and is never refilled itself.
-    /// A full target takes nothing and nothing is used up. Aimed at anything else, the press is reported unused
-    /// (so <c>MealEater</c> falls back to eating).
+    /// - On a package with its own stock (an EggsBundle): one unit moves over per click; the package keeps the rest and is
+    ///   never refilled itself.
+    /// A full target takes nothing and nothing is used up ("더 넣을 수 없어."); an empty package says so ("계란이 없어.").
+    /// Aimed at anything else, the press is reported unused (so <c>MealEater</c> goes on: the carton gives an egg into a free
+    /// slot, a loose egg says it needs cooking).
     /// </summary>
     [RequireComponent(typeof(Interactable))]
     public class StockRefiller : MonoBehaviour, IHeldPrimaryAction
@@ -22,6 +23,8 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private string contentId = "Egg";
         [Tooltip("Reach of the Left Click.")]
         [SerializeField] private float reach = 1.5f;
+        [SerializeField] private string targetFullNotice = "더 넣을 수 없어.";
+        [SerializeField] private string ownEmptyNotice = "계란이 없어.";
 
         private ConsumableStock _own;
         private FoodItem _food;
@@ -68,9 +71,17 @@ namespace CreatureExperiment.DailyLife
             if (StoreProduct.RefuseUnpaidUse(this))
                 return true; // an unpaid carton: aimed right, but nothing moves over until it is paid
 
-            int moved = target.TryAdd(Available);
+            if (Available <= 0)
+            {
+                ObjectiveHUD.Notice(ownEmptyNotice); // an empty carton aimed at the holder
+                return true;
+            }
+            int moved = target.TryAdd(1);
             if (moved <= 0)
-                return true; // full (or nothing left): the click was aimed right, nothing changes
+            {
+                ObjectiveHUD.Notice(targetFullNotice); // full: the click was aimed right, nothing changes
+                return true;
+            }
             if (_own != null)
                 _own.SetCurrent(_own.Current - moved);
             else

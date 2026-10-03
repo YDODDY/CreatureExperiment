@@ -134,9 +134,9 @@ namespace CreatureExperiment.Story
         [Tooltip("A few steps further into the home: the home narration plays here.")]
         [SerializeField] private StoryZone homeNarrationZone;
         [Tooltip("The player must stay this long in a narration zone before its narration starts (leaving resets it).")]
-        [SerializeField] private float narrationDelay = 0.6f;
+        [SerializeField] private float narrationDelay = 0.4f;
         [Tooltip("Fallback: after arriving, the narration also starts once the player has spent this long in the arrival / narration zones.")]
-        [SerializeField] private float narrationFallbackSeconds = 8f;
+        [SerializeField] private float narrationFallbackSeconds = 5.5f;
 
         [Header("Lunch")]
         [SerializeField] private StoreExitGate storeExitGate;
@@ -169,7 +169,12 @@ namespace CreatureExperiment.Story
         [SerializeField] private string taskFollowMike = "Mike를 따라 직장으로 이동하기";
         [SerializeField] private string taskClockIn = "2층 작업구역으로 이동해 출근하기";
         [SerializeField] private string taskMorningWork = "오전 작업 수행하기";
-        [SerializeField] private string taskMeetMikeDownstairs = "1층에서 Mike 만나기";
+        [Tooltip("Mike already waits on 1F; the beat goes on with E on him.")]
+        [SerializeField] private string taskMeetMikeDownstairs = "1층에서 Mike와 대화하기";
+        [Tooltip("Shown once Mike is right there and talk-ready (replaces a 'meet / follow / go back' task).")]
+        [SerializeField] private string taskTalkToMike = "Mike와 대화하기";
+        [Tooltip("Within this distance of a talk-ready Mike, a 'meet Mike' task turns into the talk task.")]
+        [SerializeField] private float talkTaskDistance = 6f;
         [SerializeField] private string taskGoToStore = "편의점 가기";
         [SerializeField] private string taskBuyLunch = "점심식사 구입하기";
         [SerializeField] private string taskBackToWork = "일터로 돌아가기";
@@ -480,7 +485,7 @@ namespace CreatureExperiment.Story
 
             beat = Day1Beat.MeetMike;
             MainTaskHUD.SetTask(taskMeetMike);
-            yield return WaitForMikeTalk();
+            yield return WaitForMikeTalk(taskTalkToMike); // "meet" while finding him, "talk" once by his side
             beat = Day1Beat.MikeConversation;
             MainTaskHUD.CompleteTask();
             yield return TalkToMike(mikeMeetLines);
@@ -721,13 +726,26 @@ namespace CreatureExperiment.Story
 
         // ---- Waits -----------------------------------------------------------------------------------------------
 
-        private IEnumerator WaitForMikeTalk()
+        /// <summary>
+        /// Mike is talk-ready; the beat goes on with the player's E. <paramref name="nearTask"/>: the task line switches to it
+        /// once the player is within <see cref="talkTaskDistance"/> of him (found him - now talk). Null = the task stays.
+        /// </summary>
+        private IEnumerator WaitForMikeTalk(string nearTask = null)
         {
             if (mike == null)
                 yield break;
             _mikeTalked = false;
             mike.SetTalkable(true);
-            yield return new WaitUntil(() => _mikeTalked);
+            bool switched = string.IsNullOrEmpty(nearTask);
+            while (!_mikeTalked)
+            {
+                if (!switched && Vector3.Distance(PlayerPosition, mike.transform.position) < talkTaskDistance)
+                {
+                    MainTaskHUD.SetTask(nearTask);
+                    switched = true;
+                }
+                yield return null;
+            }
             mike.SetTalkable(false);
         }
 
@@ -742,6 +760,7 @@ namespace CreatureExperiment.Story
             yield return WaitForMikeAndPlayerIn(zone);
             _mikeTalked = false;
             mike.SetTalkable(true);
+            MainTaskHUD.SetTask(taskTalkToMike); // both arrived: following / going back is done, the talk is next
             yield return new WaitUntil(() => _mikeTalked);
             mike.SetTalkable(false);
         }

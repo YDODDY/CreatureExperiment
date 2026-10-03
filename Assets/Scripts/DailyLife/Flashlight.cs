@@ -53,7 +53,9 @@ namespace CreatureExperiment.DailyLife
 
         private void LateUpdate()
         {
-            if (on && _item.IsHeld && body != null && !body.enabled)
+            // Body hidden while held = put away into another slot - unless the hand is only hidden for presentation
+            // (hiding in a locker): then it stays as it was.
+            if (on && _item.IsHeld && body != null && !body.enabled && Player.PlayerInteractor.PresentationHiddenItem != _item)
                 SetOn(false);
         }
 

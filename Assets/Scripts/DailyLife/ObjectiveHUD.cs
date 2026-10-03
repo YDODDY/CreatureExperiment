@@ -24,6 +24,9 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private int onGuiFontSize = 24;
         [SerializeField] private int noticeFontSize = 20;
         [SerializeField] private float noticeSeconds = 2.5f;
+        [Tooltip("The same notice asked for again within this many seconds is not restarted (no spam on repeated clicks).")]
+        [SerializeField] private float repeatCooldown = 0.9f;
+        private float _noticeShownAt = float.NegativeInfinity;
 
         private string _current = "";
         private GUIStyle _style;
@@ -44,11 +47,29 @@ namespace CreatureExperiment.DailyLife
                 text.text = _current;
         }
 
-        /// <summary>Show a short line under the objective for <see cref="noticeSeconds"/>.</summary>
+        /// <summary>Show a short line under the objective for <see cref="noticeSeconds"/>. The same line asked for again within
+        /// <see cref="repeatCooldown"/> (Left Click mashed on something that won't work) is not restarted.</summary>
         public void ShowNotice(string value)
         {
-            _notice = value ?? "";
+            value = value ?? "";
+            if (value == _notice && Time.time - _noticeShownAt < repeatCooldown && Time.time < _noticeUntil)
+                return;
+            _notice = value;
+            _noticeShownAt = Time.time;
             _noticeUntil = Time.time + noticeSeconds;
+        }
+
+        private static ObjectiveHUD s_instance;
+
+        /// <summary>Short feedback line on the scene's objective HUD (if any) - "조리가 필요해.", "비어 있어.". Empty text: nothing.</summary>
+        public static void Notice(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return;
+            if (s_instance == null)
+                s_instance = FindFirstObjectByType<ObjectiveHUD>();
+            if (s_instance != null)
+                s_instance.ShowNotice(text);
         }
 
         private void OnGUI()

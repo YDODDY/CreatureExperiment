@@ -19,8 +19,10 @@ namespace CreatureExperiment.DailyLife
     /// Deliberately not a <see cref="FoodItem"/>: it never cooks, never goes into a pan or onto a meal plate - it has no
     /// kitchen life at all. Unpaid, it is a closed package like any store product (<see cref="StoreProduct.RefuseUnpaidUse"/>).
     ///
-    /// <see cref="readyToEat"/> off (instant noodles - there is no hot water yet): the press only shows
-    /// <see cref="notReadyNotice"/>; the item stays as it is. A future preparation step would switch it on.
+    /// <see cref="readyToEat"/> off: the press only shows <see cref="notReadyNotice"/>. An instant item with a
+    /// <see cref="HotWaterPreparable"/> (cup noodle) is not eaten until a hot water station has prepared it; with
+    /// <see cref="SpillableContents"/> eating leaves the empty cup (same object) instead of destroying it, and an empty /
+    /// spilled cup answers "다 먹었어." / "다 쏟아져서 먹을 수 없어.".
     /// </summary>
     [RequireComponent(typeof(Interactable))]
     public class ReadyToEatFood : MonoBehaviour, IHeldPrimaryAction
@@ -33,6 +35,10 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private bool readyToEat = true;
         [Tooltip("Shown on Left Click while it can't be eaten yet.")]
         [SerializeField] private string notReadyNotice = "뜨거운 물이 있어야 먹을 수 있습니다.";
+        [Tooltip("Left Click on its empty container after eating it (a cup noodle).")]
+        [SerializeField] private string finishedNotice = "다 먹었어.";
+        [Tooltip("Left Click on its container after the contents spilled.")]
+        [SerializeField] private string spilledNotice = "다 쏟아져서 먹을 수 없어.";
         [Tooltip("Colour of the few crumbs at the bite.")]
         [SerializeField] private Color crumbColor = new Color(0.85f, 0.65f, 0.35f, 1f);
 
@@ -49,6 +55,13 @@ namespace CreatureExperiment.DailyLife
         {
             if (_eating)
                 return true; // already on its way to the mouth
+            if (TryGetComponent(out HotWaterPreparable prep) && !prep.IsPrepared)
+                return false; // a dry cup noodle: hot water first (HotWaterPreparable answers the press)
+            if (TryGetComponent(out SpillableContents contents) && !contents.HasContents)
+            {
+                ObjectiveHUD.Notice(contents.Spilled ? spilledNotice : finishedNotice);
+                return true; // the empty cup: nothing left to eat
+            }
             if (StoreProduct.RefuseUnpaidUse(this))
                 return true;
             if (!readyToEat)
@@ -86,7 +99,11 @@ namespace CreatureExperiment.DailyLife
             ParticleFx.Burst(at, cam != null ? -cam.transform.up + cam.transform.forward * 0.5f : Vector3.down, crumbColor, 7, 0.018f);
             Eaten?.Invoke(this);
             ConsumeEvents.Raise(gameObject, ConsumeKind.Food);
-            Destroy(gameObject); // the interactor's held reference reads as empty once the object is gone
+            // Food in a container (a cup noodle) leaves its empty cup in the hand; anything else is simply gone.
+            if (TryGetComponent(out SpillableContents contents))
+                contents.EmptyOut(spilled: false);
+            else
+                Destroy(gameObject); // the interactor's held reference reads as empty once the object is gone
         }
     }
 }

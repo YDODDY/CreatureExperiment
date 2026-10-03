@@ -30,6 +30,10 @@ namespace CreatureExperiment.Interaction
         [Tooltip("What this item IS (identity, several allowed) - e.g. Food | Ingredient for an egg. Never what it can do: that is its components.")]
         [SerializeField] private ItemTag tags;
 
+        [Header("Physical")]
+        [Tooltip("What this item is like for whatever it hits: Soft (food, paper, a cigarette), Hard (pan, plate, can, jar), Sharp (knife - Hard + can puncture). Unset = old tag-based fallback.")]
+        [SerializeField] private ImpactClass impactClass;
+
         [Header("Policy")]
         [Tooltip("Can be thrown away in a GarbageDump. Off for items that must not disappear (work items).")]
         [SerializeField] private bool discardable;
@@ -62,6 +66,15 @@ namespace CreatureExperiment.Interaction
 
         /// <summary>Identity tags - what this item is (see <see cref="ItemTag"/>).</summary>
         public ItemTag Tags => tags;
+
+        /// <summary>Change the identity at runtime (a drunk drink is no longer a Drink).</summary>
+        public void SetTags(ItemTag value) => tags = value;
+
+        /// <summary>What this item is like for whatever it hits (see <see cref="ImpactClass"/>).</summary>
+        public ImpactClass Impact => impactClass;
+
+        /// <summary>Hard or Sharp - breaks fragile things it runs into.</summary>
+        public bool IsHardImpact => impactClass == ImpactClass.Hard || impactClass == ImpactClass.Sharp;
 
         /// <summary>True if this item has at least one of <paramref name="any"/>.</summary>
         public bool HasAny(ItemTag any) => (tags & any) != 0;
@@ -138,12 +151,44 @@ namespace CreatureExperiment.Interaction
         /// </summary>
         public bool TryGrab(Object holder)
         {
-            if (holder == null || (Holder != null && Holder != holder))
+            if (holder == null || (Holder != null && Holder != holder) || IsPickupLocked)
                 return false;
             Holder = holder;
             LastThrowMode = ThrowMode.None;
             LastThrower = null;
             return true;
+        }
+
+        /// <summary>
+        /// Whoever has this item seated so it can't be taken directly (a frying pan's food spot holding a fried egg), or
+        /// null. While set, nobody can grab it (<see cref="TryGrab"/>) and an aim at it means the item it sits in
+        /// (<see cref="PickupTarget"/>) - E lifts the pan, Left Click does not eat the food off it. Its colliders stay on:
+        /// it is still a physical object, just not a separate pickup. Set / cleared by the seat (<see cref="SetPickupLock"/>).
+        /// </summary>
+        public Object PickupLock { get; private set; }
+
+        public bool IsPickupLocked => PickupLock != null;
+
+        /// <summary>Seat lock on, owned by <paramref name="owner"/> (the seat).</summary>
+        public void SetPickupLock(Object owner) => PickupLock = owner;
+
+        /// <summary>Seat lock off - only by the seat that set it.</summary>
+        public void ClearPickupLock(Object owner)
+        {
+            if (PickupLock == owner)
+                PickupLock = null;
+        }
+
+        /// <summary>What an aim at <paramref name="item"/> really means: the item itself, or - while it is seat-locked - the
+        /// nearest item it sits in (food in a pan → the pan). Null if nothing pick-up-able is left.</summary>
+        public static Interactable PickupTarget(Interactable item)
+        {
+            while (item != null && item.IsPickupLocked)
+            {
+                Transform parent = item.transform.parent;
+                item = parent != null ? parent.GetComponentInParent<Interactable>() : null;
+            }
+            return item;
         }
 
         /// <summary>Drop the claim, but only if <paramref name="holder"/> is the one that holds it right now.</summary>

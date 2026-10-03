@@ -21,5 +21,15 @@ namespace CreatureExperiment.Interaction
         /// never a surface to place on. Empty hands: still an ordinary pickup. Default false (packing box, walls).
         /// </summary>
         bool IsDedicated => false;
+
+        /// <summary>
+        /// Cooking / serving receivers (pan, pot, toaster, plate, bowl): the item is handed over with the held item's Left Click
+        /// (its primary use - <c>FoodItem</c> asks the aimed receiver), never with Interact. For Interact this is just an
+        /// ordinary pick-up-able object (E lifts the pan / plate). Default false (packing box, walls keep E).
+        /// </summary>
+        bool ReceivesWithPrimary => false;
+
+        /// <summary>The Left Click hint while the held item can go in ("LMB {this}") - default the focus name ("올려놓기").</summary>
+        string PrimaryReceivePrompt => FocusName;
     }
 }

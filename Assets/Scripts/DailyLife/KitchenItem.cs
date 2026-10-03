@@ -10,7 +10,8 @@ namespace CreatureExperiment.DailyLife
         CuttingBoard,
         Knife,
         Plate,
-        Bowl
+        Bowl,
+        Cup
     }
 
     /// <summary>

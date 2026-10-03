@@ -11,8 +11,9 @@ namespace CreatureExperiment.DailyLife
     /// (along the contact normal) decides; how it was thrown does not. A placed or gently dropped egg
     /// stays whole; a cooked egg never breaks this way.
     ///
-    /// Also: hit by something the player just threw that is not food (<see cref="ThrownImpact"/> - a knife, a pan,
-    /// a box...), a loose raw egg breaks whatever its own speed; the splat goes onto the surface it was lying on.
+    /// Also: hit by something hard the player just threw (<see cref="ThrownImpact"/>: Hard / Sharp <see cref="ImpactClass"/> -
+    /// a knife, a pan, a jar...), a loose raw egg breaks whatever its own speed; the splat goes onto the surface it was lying on.
+    /// A Soft item (bread, a cigarette, food) running into it never breaks it, however fast.
     /// A thrown egg that is caught by a pan (<see cref="ThrownItemCatch"/>) is never broken - the catch is tried first.
     ///
     /// The stain is attached to the surface it landed on (<see cref="SurfaceMount"/>), so it moves with a door.
@@ -55,6 +56,12 @@ namespace CreatureExperiment.DailyLife
                 BreakWhereItLies(collision.collider);
                 return;
             }
+
+            // A soft item (bread, a cigarette, another food) running into it never cracks it, however fast -
+            // the relative speed below would otherwise count the other item's speed as the egg's own impact.
+            Interactable other = collision.rigidbody != null ? collision.rigidbody.GetComponent<Interactable>() : null;
+            if (other != null && !ThrownImpact.IsHard(other))
+                return;
 
             // Its own fall / throw: breaks only if it hits hard enough along the contact normal.
             ContactPoint contact = collision.GetContact(0);

@@ -132,12 +132,13 @@ namespace CreatureExperiment.StoryEditor
             var storeOut = Zone(zones, "Zone_ConvenienceStoreOutside", new Vector3(52f, -2.5f, -16.8f), new Vector3(6.0f, 2.2f, 4.4f), 0f);
             var smokingArea = Zone(zones, "Zone_SmokingArea", AtWorkplace(-5.75f, -132.4f, -2.5f), new Vector3(3.6f, 2.2f, 5.4f), s_workplace.eulerAngles.y);
             var home = Zone(zones, "Zone_HomeInside", AtVilla(1.0f, -0.95f, 1.0f), new Vector3(1.4f, 2.2f, 1.6f), s_villa.eulerAngles.y);
-            // Narration zones: arrival (above) only records "got here"; the narration waits until the player is ~3-4 steps
-            // further in. Work area: from 2.3 m past the Work Door (door at x 2.3) over the work floor. Home: the whole
-            // living / dining / kitchen room minus a ~2.4 m buffer strip inside the front door (door at x 1.77).
-            var workAreaNarration = Zone(zones, "Zone_WorkAreaNarration", AtWorkplace(8.75f, -122.65f, 1.0f), new Vector3(8.3f, 2.2f, 14.7f), s_workplace.eulerAngles.y);
+            // Narration zones: arrival (above) only records "got here"; the narration waits until the player is 2-3 steps
+            // further in and has stood there narrationDelay (0.4 s). Work area: from 2.0 m past the Work Door (door at x 2.3)
+            // over the work floor. Home: the whole living / dining / kitchen room minus a ~1.9 m buffer strip inside the front
+            // door (door at x 1.74). (Day 1 UX polish: was 2.3 m / 2.34 m + 0.6 s - it felt late.)
+            var workAreaNarration = Zone(zones, "Zone_WorkAreaNarration", AtWorkplace(8.6f, -122.65f, 1.0f), new Vector3(8.6f, 2.2f, 14.7f), s_workplace.eulerAngles.y);
             var homeNarration = Zone(zones, "Zone_HomeNarration", AtVilla(-1.625f, 1.675f, 1.0f), new Vector3(6.75f, 2.2f, 10.05f), s_villa.eulerAngles.y);
-            var homeEntryBuffer = Zone(zones, "Zone_HomeEntryBuffer", AtVilla(0.75f, -1.05f, 1.0f), new Vector3(2.7f, 2.2f, 4.7f), s_villa.eulerAngles.y);
+            var homeEntryBuffer = Zone(zones, "Zone_HomeEntryBuffer", AtVilla(0.97f, -1.05f, 1.0f), new Vector3(2.26f, 2.2f, 4.7f), s_villa.eulerAngles.y);
             var hso = new SerializedObject(homeNarration);
             hso.FindProperty("exclude").objectReferenceValue = homeEntryBuffer;
             hso.ApplyModifiedPropertiesWithoutUndo();

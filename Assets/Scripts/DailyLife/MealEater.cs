@@ -16,7 +16,9 @@ namespace CreatureExperiment.DailyLife
     /// 3. Hands empty, aiming at edible food / a meal plate within <see cref="reach"/>: eat it. Food served
     ///    on a plate is eaten with its plate.
     /// Before 2 / 3: aiming at a container lying in the world (egg carton, bacon pack, bread bag, cigarette pack -
-    /// <see cref="IAimedPrimaryAction"/>) takes one of its contents into a free slot.
+    /// <see cref="IAimedPrimaryAction"/>) takes one of its contents into a free slot; otherwise, if the held item is
+    /// such a container itself, one of ITS contents goes into a free slot and the container stays in the hand.
+    /// Order: held item's own action (carton → fridge holder) > aimed world container > held container > eat.
     /// Anything else: nothing. Interact (E) stays the plain world interaction (pickup / place / use).
     /// </summary>
     public class MealEater : MonoBehaviour
@@ -28,6 +30,8 @@ namespace CreatureExperiment.DailyLife
         [SerializeField] private Transform aimSource;
         [Tooltip("Reach for eating aimed food with empty hands.")]
         [SerializeField] private float reach = 1.5f;
+        [Tooltip("Reach of a fixed world action that outranks the hand (a hideable locker) - matches the World Use range its label is shown at.")]
+        [SerializeField] private float overrideReach = 2.2f;
 
         private InputAction _primary;
         private IHeldPrimaryAction _active;
@@ -81,11 +85,19 @@ namespace CreatureExperiment.DailyLife
             if (!_primary.WasPressedThisFrame())
                 return;
 
+            // A fixed world action that outranks the hand (a locker to hide in): before any held-item use, with the same
+            // reach as the World Use label that announces it.
+            if (TryAimedOverride(ray))
+                return;
+
             if (held != null)
             {
-                var action = held.GetComponent<IHeldPrimaryAction>();
-                if (action != null && action.PrimaryPress(ray))
+                // Every Left Click action on the item, in component order, until one uses the press (a raw egg: into the
+                // pan it is aimed at (FoodItem), else into the fridge holder it is aimed at (StockRefiller), else on below).
+                foreach (var action in held.GetComponents<IHeldPrimaryAction>())
                 {
+                    if (!action.PrimaryPress(ray))
+                        continue;
                     if (action.PrimaryActive)
                     {
                         _active = action;
@@ -97,23 +109,50 @@ namespace CreatureExperiment.DailyLife
                 // otherwise eat what is in the hand if it is edible.
                 if (TryTakeFromAimedContainer(ray))
                     return;
+                // The held item is itself a container (a cigarette pack, an egg carton): take one out into a free slot.
+                IAimedPrimaryAction heldTake = AimedPrimary.Find(held);
+                if (heldTake != null && heldTake.TryAimedPrimary())
+                    return;
                 TryEat(held, fromHand: true); // the interactor's held reference becomes null once the object is destroyed
                 return;
             }
 
             if (TryTakeFromAimedContainer(ray))
                 return;
+            // Food seated in a pan resolves to the pan (not edible): hot food is served onto a plate first, never eaten off the pan.
             if (Physics.Raycast(ray, out RaycastHit hit, reach, ~0, QueryTriggerInteraction.Ignore))
-                TryEat(hit.collider.GetComponentInParent<Interactable>(), fromHand: false);
+                TryEat(Interactable.PickupTarget(hit.collider.GetComponentInParent<Interactable>()), fromHand: false);
         }
 
-        // Left Click on a container lying in the world (egg carton, pack): take one of its contents (IAimedPrimaryAction).
+        private bool TryAimedOverride(Ray ray)
+        {
+            if (!Physics.Raycast(ray, out RaycastHit hit, Mathf.Max(reach, overrideReach), ~0, QueryTriggerInteraction.Ignore))
+                return false;
+            if (hit.collider.GetComponentInParent<Interactable>() != null)
+                return false;
+            var fixedAction = hit.collider.GetComponentInParent<IAimedPrimaryAction>();
+            if (fixedAction == null || !fixedAction.OverridesHeldItem)
+                return false;
+            // Aimed at it = the press belongs to it, even when it can't act right now (a locker door still swinging):
+            // never falls through to eating / drinking what is in the hand.
+            if (fixedAction.PrimaryEnabled)
+                fixedAction.TryAimedPrimary();
+            return true;
+        }
+
+        // Left Click on a container in the world (egg carton, pack - IAimedPrimaryAction on a pickup), or on a fixed one that is
+        // not a pickup at all (the fridge door egg holder): take one of its contents.
         private bool TryTakeFromAimedContainer(Ray ray)
         {
             if (!Physics.Raycast(ray, out RaycastHit hit, reach, ~0, QueryTriggerInteraction.Ignore))
                 return false;
-            var item = hit.collider.GetComponentInParent<Interactable>();
-            if (item == null || item.IsHeld)
+            var item = Interactable.PickupTarget(hit.collider.GetComponentInParent<Interactable>());
+            if (item == null)
+            {
+                var fixedTake = hit.collider.GetComponentInParent<IAimedPrimaryAction>();
+                return fixedTake != null && fixedTake.PrimaryEnabled && fixedTake.TryAimedPrimary();
+            }
+            if (item.IsHeld)
                 return false;
             IAimedPrimaryAction take = AimedPrimary.Find(item);
             return take != null && take.TryAimedPrimary();
@@ -148,6 +187,12 @@ namespace CreatureExperiment.DailyLife
                 meal.Eat();
             else if (food != null && food.IsEdible)
                 food.Eat();
+            else if (fromHand && food != null)
+                ObjectiveHUD.Notice(food.NotReadyNotice); // raw: "조리가 필요해." / "구워서 먹어야 해." / "냄비에 넣어야 해."
+            else if (fromHand && meal != null)
+                ObjectiveHUD.Notice("비어 있어.");
+            else if (fromHand && target.TryGetComponent(out DrinkContainer drink) && !drink.IsFull)
+                ObjectiveHUD.Notice("이미 다 마셨어."); // an empty can / bottle: the same object, nothing left in it
         }
     }
 }

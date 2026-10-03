@@ -362,19 +362,112 @@ namespace CreatureExperiment.DistrictEditor
             Building(g, "Blockout_Facade_03", "FACADE", -100.3f, -78.7f, 17f, 36.5f, 7f, Side.South, -89.4f, false);
             // Zone B / across Main Street from the villa side
             Building(g, "Blockout_GeneralMart", "GENERAL MART", 3.4f, 25.8f, 17.9f, 35.7f, 6.5f, Side.South, 14.5f, true);
+            // The interactive General Mart (Item Architecture v1 pass) sits in the front of this block: keep it hollow.
+            CarveAroundStore(g.Find("Blockout_GeneralMart"), "Street/StoreShells/GeneralMart", 3.4f, 25.8f, 17.9f, 35.7f, 6.5f);
             // Zone D / civic-leisure
             Building(g, "Blockout_Apartment", "APARTMENT", 45.4f, 73.4f, 48.5f, 67.1f, 16f, Side.South, 59.8f, true);
             Building(g, "Blockout_Facade_04", "FACADE", 45.4f, 59f, 17f, 38.2f, 8f, Side.South, 52.2f, false);
             // Zone C / mid commercial
             Building(g, "Blockout_Facade_05", "FACADE", -96.6f, -58.3f, -53.6f, -36.6f, 8f, Side.South, -77.9f, false);
-            Building(g, "Blockout_PubBar", "PUB / BAR", -35.4f, 10.2f, -24.3f, -13.1f, 7f, Side.North, -14.5f, true);
+            // Narrowed (was x -35.4..10.2): the strips either side are the pub's service yard (west) and parking (east).
+            Building(g, "Blockout_PubBar", "PUB / BAR", -31.4f, 5.2f, -24.3f, -13.1f, 7f, Side.North, -14.5f, true);
+            // The enterable pub (EateriesBuilder) stands in the north front of this block.
+            CarveAroundInterior(g.Find("Blockout_PubBar"), "Street/StoreShells/PubBar", "Pub_", -31.4f, 5.2f, -24.3f, -13.1f, 7f);
             Building(g, "Blockout_Facade_06", "FACADE", -27.7f, 9.7f, -35.7f, -26.4f, 7f, Side.West, -31f, false);
             Building(g, "Blockout_FastFoodStore", "FAST FOOD", -36.2f, -10.7f, -53.6f, -37.4f, 6f, Side.South, -23.5f, true);
+            CarveAroundInterior(g.Find("Blockout_FastFoodStore"), "Street/StoreShells/FastFoodStore", "FF_", -36.2f, -10.7f, -53.6f, -37.4f, 6f);
             Building(g, "Blockout_Facade_07", "FACADE", -7.8f, 9.7f, -53.6f, -37.4f, 7.5f, Side.South, 0.9f, false);
             // Zone E / service (south of the Delivery Alley)
             Building(g, "Blockout_Facade_08", "FACADE", 25.8f, 42.8f, -68f, -54f, 6.5f, Side.South, 34.3f, false);
             Building(g, "Blockout_Facade_09", "FACADE", 45.7f, 59.8f, -68f, -54f, 7f, Side.South, 52.7f, false);
             Building(g, "Blockout_Facade_10", "FACADE", 63.2f, 76f, -68f, -54f, 6f, Side.South, 69.6f, false);
+        }
+
+        /// <summary>
+        /// A real store shell standing inside a blockout block (the General Mart): the single Mass box would swallow it, so
+        /// it is switched off and the rest of the footprint is filled around the store's walls (two front sides, the back,
+        /// and above its roof) - the block keeps its silhouette, the store stays enterable. Its door panel and front label
+        /// are hidden (the store has its own door and sign). No store in the scene: nothing changes.
+        /// </summary>
+        private static void CarveAroundStore(Transform block, string storePath, float x0, float x1, float z0, float z1, float height)
+        {
+            var store = GameObject.Find(storePath);
+            if (block == null || store == null)
+                return;
+            bool any = false;
+            var b = new Bounds();
+            foreach (var r in store.GetComponentsInChildren<Renderer>())
+            {
+                if (!r.gameObject.name.StartsWith("GShop_"))
+                    continue;
+                if (!any) { b = r.bounds; any = true; }
+                else b.Encapsulate(r.bounds);
+            }
+            if (!any)
+                return;
+            var mass = block.Find("Mass");
+            if (mass != null)
+                mass.gameObject.SetActive(false);
+            float top = Ground + height;
+            Slab(block, "Mass_FrontWest", x0, b.min.x, z0, b.max.z, Ground, top, "BuildingFuture", collider: true);
+            Slab(block, "Mass_FrontEast", b.max.x, x1, z0, b.max.z, Ground, top, "BuildingFuture", collider: true);
+            Slab(block, "Mass_Back", x0, x1, b.max.z, z1, Ground, top, "BuildingFuture", collider: true);
+            Slab(block, "Mass_AboveStore", b.min.x, b.max.x, z0, b.max.z, b.max.y, top, "BuildingFuture", collider: true);
+            var door = block.Find("FrontEntrance/Door");
+            if (door != null)
+                door.gameObject.SetActive(false);
+            foreach (Transform c in block)
+                if (c.name.StartsWith("Label_") && c.position.y < top - 1f)
+                    c.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// Same idea as <see cref="CarveAroundStore"/> for an interior on ANY face of the block (the pub's is on the north,
+        /// the fast-food store's on the south): the Mass is switched off and up to five slabs fill the rest of the
+        /// footprint - west, east, south, north of the interior's bounds (its renderers named <paramref name="prefix"/>*),
+        /// and above its roof. Slabs of no thickness are skipped. The door panel and the low front label are hidden.
+        /// Safe to run again: earlier fill slabs are replaced. No interior in the scene: nothing changes.
+        /// </summary>
+        internal static void CarveAroundInterior(Transform block, string storePath, string prefix, float x0, float x1, float z0, float z1, float height)
+        {
+            var store = GameObject.Find(storePath);
+            if (block == null || store == null)
+                return;
+            bool any = false;
+            var b = new Bounds();
+            foreach (var r in store.GetComponentsInChildren<Renderer>())
+            {
+                if (!r.gameObject.name.StartsWith(prefix))
+                    continue;
+                if (!any) { b = r.bounds; any = true; }
+                else b.Encapsulate(r.bounds);
+            }
+            if (!any)
+                return;
+            for (int i = block.childCount - 1; i >= 0; i--)
+                if (block.GetChild(i).name.StartsWith("Mass_"))
+                    Undo.DestroyObjectImmediate(block.GetChild(i).gameObject);
+            var mass = block.Find("Mass");
+            if (mass != null)
+                mass.gameObject.SetActive(false);
+            float top = Ground + height;
+            float ix0 = Mathf.Max(x0, b.min.x), ix1 = Mathf.Min(x1, b.max.x), iz0 = Mathf.Max(z0, b.min.z), iz1 = Mathf.Min(z1, b.max.z);
+            void Fill(string name, float a0, float a1, float c0, float c1, float y0)
+            {
+                if (a1 - a0 > 0.01f && c1 - c0 > 0.01f && top - y0 > 0.01f)
+                    Slab(block, name, a0, a1, c0, c1, y0, top, "BuildingFuture", collider: true);
+            }
+            Fill("Mass_West", x0, ix0, z0, z1, Ground);
+            Fill("Mass_East", ix1, x1, z0, z1, Ground);
+            Fill("Mass_South", ix0, ix1, z0, iz0, Ground);
+            Fill("Mass_North", ix0, ix1, iz1, z1, Ground);
+            Fill("Mass_AboveInterior", ix0, ix1, iz0, iz1, b.max.y);
+            var door = block.Find("FrontEntrance/Door");
+            if (door != null)
+                door.gameObject.SetActive(false);
+            foreach (Transform c in block)
+                if (c.name.StartsWith("Label_") && c.position.y < top - 1f)
+                    c.gameObject.SetActive(false);
         }
 
         private static void Building(Transform g, string name, string label, float x0, float x1, float z0, float z1, float height,
