@@ -47,6 +47,7 @@ namespace CreatureExperiment.DistrictEditor
             RetireOldTown();
             MoveBuildings();
             BuildDistrict();
+            ParkBuilder.Build(); // Playground Park + Pocket Garden (own "Parks" root)
         }
 
         // =============================================================================================================
@@ -540,17 +541,8 @@ namespace CreatureExperiment.DistrictEditor
             var g = Group("Leisure");
             Slab(g, "Park_Ground", 76.8f, 101.5f, 44.2f, 68.9f, Ground + 0.004f, Ground + 0.03f, "Grass", collider: false);
             Label(g, "PARK", new Vector3(89f, Ground + 0.06f, 56.5f), Vector3.up, 0.8f);
-            Slab(g, "Playground_Ground", 63.2f, 101f, 15.3f, 39.9f, Ground + 0.004f, Ground + 0.03f, "Grass", collider: false);
-            Slab(g, "Playground_PlayArea", 72f, 92f, 20f, 35f, Ground + 0.03f, Ground + 0.05f, "Sand", collider: false);
-            Label(g, "PLAYGROUND", new Vector3(82f, Ground + 0.08f, 27.5f), Vector3.up, 0.8f);
-            // Playground placeholders (simple primitives)
-            Box(g, "Playground_Slide_Placeholder", new Vector3(76f, Ground + 1.0f, 31f), new Vector3(1.2f, 2f, 4f), "PlayRed", collider: true);
-            Box(g, "Playground_Swing_Placeholder", new Vector3(84f, Ground + 1.25f, 32f), new Vector3(4f, 2.5f, 0.3f), "PlayBlue", collider: true);
-            Box(g, "Playground_Climber_Placeholder", new Vector3(88f, Ground + 0.75f, 23f), new Vector3(3f, 1.5f, 3f), "PlayYellow", collider: true);
-            Box(g, "Playground_Seesaw_Placeholder", new Vector3(78f, Ground + 0.35f, 23f), new Vector3(3.5f, 0.3f, 0.5f), "PlayBlue", collider: true);
-            // Small Open Lot (mostly empty, slightly different paving)
-            Slab(g, "SmallOpenLot_Paving", -28.6f, -1.4f, 17f, 36.5f, Ground + 0.004f, Ground + 0.012f, "Lot", collider: false);
-            Label(g, "SMALL OPEN LOT", new Vector3(-15f, Ground + 0.03f, 26.7f), Vector3.up, 0.6f);
+            // The Playground block and the Small Open Lot are built by ParkBuilder (root "Parks": Playground Park + Pocket
+            // Garden) - nothing of theirs is made here any more.
         }
 
         private static void BuildParking()
@@ -599,8 +591,6 @@ namespace CreatureExperiment.DistrictEditor
             Clone(lampT, lamps, "Lamp_Delivery_E", new Vector3(90.8f, -1.07f, -44f), 90f);
             Clone(lampT, lamps, "Lamp_Park", new Vector3(78f, -1.07f, 46f), 0f);
             Clone(lampT, lamps, "Lamp_Park2", new Vector3(100f, -1.07f, 66f), 180f);
-            Clone(lampT, lamps, "Lamp_Playground", new Vector3(64.5f, -1.07f, 17f), 0f);
-            Clone(lampT, lamps, "Lamp_Playground2", new Vector3(99.5f, -1.07f, 38f), 180f);
             Clone(lampT, lamps, "Lamp_Parking", new Vector3(-60f, -1.07f, -65f), 90f);
             Clone(lampT, lamps, "Lamp_Parking2", new Vector3(0f, -1.07f, -65f), 90f);
 
@@ -608,20 +598,16 @@ namespace CreatureExperiment.DistrictEditor
             foreach (var p in new[]
             {
                 new Vector2(80f, 64f), new Vector2(97f, 62f), new Vector2(81f, 49f), new Vector2(97f, 48f), new Vector2(89f, 66f),  // park
-                new Vector2(66f, 37f), new Vector2(99f, 18f), new Vector2(67f, 19f),                                                    // playground
                 new Vector2(-85f, 9.8f), new Vector2(-44f, 9.8f), new Vector2(-2f, 9.8f), new Vector2(54f, 9.8f), new Vector2(90f, 9.8f), // Main N frontage
                 new Vector2(-88f, -10.5f), new Vector2(-40f, -10.5f), new Vector2(28f, -10.5f), new Vector2(93f, -10.5f),                 // Main S frontage
                 new Vector2(-21f, 44.2f), new Vector2(-58.5f, 48f), new Vector2(-61.2f, -20f), new Vector2(-101f, -45f),                  // residential / edges
-                new Vector2(-20f, 30f), new Vector2(88.5f, -41.5f),                                                                        // open lot, smoking area side
+                new Vector2(88.5f, -41.5f),                                                                                                // smoking area side
             })
                 Clone(treeT, trees, "Tree", new Vector3(p.x, Ground, p.y), 0f);
 
             var benches = Child(g, "Benches");
             Clone(benchT, benches, "Bench_Park", new Vector3(89f, Ground, 52f), 0f);
             Clone(benchT, benches, "Bench_Park2", new Vector3(92f, Ground, 61f), 180f);
-            Clone(benchT, benches, "Bench_Playground", new Vector3(82f, Ground, 17.5f), 0f);
-            Clone(benchT, benches, "Bench_Playground2", new Vector3(97f, Ground, 28f), 270f);
-            Clone(benchT, benches, "Bench_OpenLot", new Vector3(-12f, Ground, 20f), 0f);
             Clone(benchT, benches, "Bench_Cafe_Main", new Vector3(-66f, Ground, -11f), 180f);
             Clone(benchT, benches, "Bench_Main_N", new Vector3(10f, Ground, 10.5f), 0f);
 
@@ -629,8 +615,7 @@ namespace CreatureExperiment.DistrictEditor
             foreach (var (n, p, yaw) in new[]
             {
                 ("Bin_Grocery", new Vector3(-0.2f, Ground, 45.5f), 180f), ("Bin_GameCD", new Vector3(-34.5f, Ground, 16.5f), 180f),
-                ("Bin_OpenLot", new Vector3(-6f, Ground, 19f), 0f), ("Bin_Park", new Vector3(86f, Ground, 50f), 0f),
-                ("Bin_Playground", new Vector3(95f, Ground, 17f), 0f), ("Bin_ConvenienceStore", new Vector3(44.5f, Ground, -12f), 0f),
+                ("Bin_Park", new Vector3(86f, Ground, 50f), 0f), ("Bin_ConvenienceStore", new Vector3(44.5f, Ground, -12f), 0f),
                 ("Bin_WorkplaceRear", new Vector3(84.5f, Ground, -42.5f), 0f), ("Bin_BackAlley", new Vector3(-18f, Ground, -57.2f), 0f),
                 ("Bin_Cafe", new Vector3(-86f, Ground, -26f), 180f), ("Bin_Main_N", new Vector3(-62f, Ground, 10.5f), 0f),
             })
